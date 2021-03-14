@@ -1,8 +1,24 @@
-/* ------------------------------------------------------------------------- *
- * Copyright (C) 2012-2013 Jolla Ltd.
- * Contact: Simo Piiroinen <simo.piiroinen@jollamobile.com>
- * License: GPLv2
- * ------------------------------------------------------------------------- */
+/**
+ * @file evdev.c
+ * Mode Control Entity - evdev input device handling
+ * <p>
+ * Copyright (c) 2012 - 2020 Jolla Ltd.
+ * Copyright (c) 2020 Open Mobile Platform LLC.
+ * <p>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ *
+ * mce is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
+ *
+ * mce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 #include "evdev.h"
 
@@ -247,7 +263,8 @@ int evdev_identify_device(int fd)
   unsigned long bmap_type[BMAP_SIZE(EV_CNT)];
   unsigned long bmap_code[BMAP_SIZE(KEY_CNT)];
   unsigned long bmap_stat[BMAP_SIZE(KEY_CNT)];
-  char path[256];
+  char linkpath[PATH_MAX];
+  char path[PATH_MAX];
   int n;
 
   if( fd < 0 )
@@ -255,8 +272,8 @@ int evdev_identify_device(int fd)
     goto cleanup;
   }
 
-  snprintf(path, sizeof path, "/proc/self/fd/%d", fd);
-  if( (n = readlink(path, path, sizeof path - 1)) <= 0 )
+  snprintf(linkpath, sizeof linkpath, "/proc/self/fd/%d", fd);
+  if( (n = readlink(linkpath, path, sizeof path - 1)) <= 0 )
   {
     strcpy(path, "unknown");
   }

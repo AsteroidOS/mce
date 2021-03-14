@@ -1,6 +1,6 @@
 # Makefile for MCE
 # Copyright © 2004-2011 Nokia Corporation.
-# Copyright (C) 2012-2017 Jolla Ltd.
+# Copyright (C) 2012-2019 Jolla Ltd.
 #
 # @author David Weinehall <david.weinehall@nokia.com>
 # @author Tuomo Tanskanen
@@ -57,7 +57,7 @@ distclean:: clean
 # CONFIGURATION
 # ----------------------------------------------------------------------------
 
-VERSION := 1.90.4
+VERSION := 1.106.6
 
 INSTALL_BIN := install --mode=755
 INSTALL_DIR := install -d
@@ -85,7 +85,7 @@ endif
 PKG_CONFIG   ?= pkg-config
 
 # Whether to enable DEVEL release logging
-ENABLE_DEVEL_LOGGING ?= n
+ENABLE_DEVEL_LOGGING ?= y
 
 # Whether to enable support for libhybris plugin
 ENABLE_HYBRIS ?= y
@@ -138,11 +138,12 @@ HELPERSCRIPTDIR       := $(_DATADIR)/mce
 TESTSDESTDIR          := $(_TESTSDIR)/mce
 
 # Source directories
-DOCDIR     := doc
-TOOLDIR    := tools
-TESTSDIR   := tests
-UTESTDIR   := tests/ut
-MODULE_DIR := modules
+DOCDIR          := doc
+TOOLDIR         := tools
+TESTSDIR        := tests
+UTESTDIR        := tests/ut
+MODULE_DIR      := modules
+DBUS_GMAIN_DIR  := dbus-gmain
 
 # Binaries to build
 TARGETS += mce
@@ -150,6 +151,7 @@ TARGETS += mce
 # Plugins to build
 MODULES += $(MODULE_DIR)/radiostates.so
 MODULES += $(MODULE_DIR)/filter-brightness-als.so
+MODULES += $(MODULE_DIR)/fingerprint.so
 MODULES += $(MODULE_DIR)/proximity.so
 MODULES += $(MODULE_DIR)/keypad.so
 MODULES += $(MODULE_DIR)/inactivity.so
@@ -160,6 +162,7 @@ MODULES += $(MODULE_DIR)/battery-bme.so
 MODULES += $(MODULE_DIR)/battery-upower.so
 MODULES += $(MODULE_DIR)/bluetooth.so
 MODULES += $(MODULE_DIR)/battery-statefs.so
+MODULES += $(MODULE_DIR)/battery-udev.so
 MODULES += $(MODULE_DIR)/buttonbacklight.so
 MODULES += $(MODULE_DIR)/display.so
 MODULES += $(MODULE_DIR)/usbmode.so
@@ -175,6 +178,7 @@ MODULES += $(MODULE_DIR)/packagekit.so
 # Tools to build
 TOOLS   += $(TOOLDIR)/mcetool
 TOOLS   += $(TOOLDIR)/evdev_trace
+TOOLS   += $(TOOLDIR)/dummy_compositor
 
 # Unit tests to build
 UTESTS  += $(UTESTDIR)/ut_display_conf
@@ -193,70 +197,75 @@ DBUSCONF              := mce.conf
 # ----------------------------------------------------------------------------
 
 # C Preprocessor
-override CPPFLAGS += -D_GNU_SOURCE
-override CPPFLAGS += -DG_DISABLE_DEPRECATED
-override CPPFLAGS += -DOSSOLOG_COMPILE
-override CPPFLAGS += -DMCE_VAR_DIR=$(VARDIR)
-override CPPFLAGS += -DMCE_RUN_DIR=$(RUNDIR)
-override CPPFLAGS += -DPRG_VERSION=$(VERSION)
+CPPFLAGS += -D_GNU_SOURCE
+CPPFLAGS += -DG_DISABLE_DEPRECATED
+CPPFLAGS += -DOSSOLOG_COMPILE
+CPPFLAGS += -DMCE_VAR_DIR=$(VARDIR)
+CPPFLAGS += -DMCE_RUN_DIR=$(RUNDIR)
+CPPFLAGS += -DPRG_VERSION=$(VERSION)
+# Default module path
+CPPFLAGS += -DMCE_DEFAULT_MCE_MODULE_PATH=$(MODULEDIR)
 
 ifeq ($(strip $(ENABLE_WAKELOCKS)),y)
-override CPPFLAGS += -DENABLE_WAKELOCKS
+CPPFLAGS += -DENABLE_WAKELOCKS
 endif
 
 ifeq ($(strip $(ENABLE_CPU_GOVERNOR)),y)
-override CPPFLAGS += -DENABLE_CPU_GOVERNOR
+CPPFLAGS += -DENABLE_CPU_GOVERNOR
 endif
 
 ifeq ($(ENABLE_HYBRIS),y)
-override CPPFLAGS += -DENABLE_HYBRIS
+CPPFLAGS += -DENABLE_HYBRIS
 endif
 
 ifeq ($(ENABLE_DOUBLETAP_EMULATION),y)
-override CPPFLAGS += -DENABLE_DOUBLETAP_EMULATION
+CPPFLAGS += -DENABLE_DOUBLETAP_EMULATION
 endif
 
 ifeq ($(ENABLE_DEVEL_LOGGING),y)
-override CPPFLAGS += -DENABLE_DEVEL_LOGGING
+CPPFLAGS += -DENABLE_DEVEL_LOGGING
+CPPFLAGS += -DENABLE_BATTERY_SIMULATION
 endif
 
 # C Compiler
-override CFLAGS += -std=c99
+CFLAGS += -std=c99
 
 # Do we really need all of these?
-override CFLAGS += -Wall
-override CFLAGS += -Wextra
-override CFLAGS += -Wpointer-arith
-override CFLAGS += -Wundef
-override CFLAGS += -Wcast-align
-override CFLAGS += -Wshadow
-override CFLAGS += -Wbad-function-cast
-override CFLAGS += -Wwrite-strings
-override CFLAGS += -Wsign-compare
-override CFLAGS += -Waggregate-return
-override CFLAGS += -Wmissing-noreturn
-override CFLAGS += -Wnested-externs
+CFLAGS += -Wall
+CFLAGS += -Wextra
+CFLAGS += -Wpointer-arith
+CFLAGS += -Wundef
+CFLAGS += -Wcast-align
+CFLAGS += -Wshadow
+CFLAGS += -Wbad-function-cast
+CFLAGS += -Wwrite-strings
+CFLAGS += -Wsign-compare
+CFLAGS += -Waggregate-return
+CFLAGS += -Wmissing-noreturn
+CFLAGS += -Wnested-externs
 #CFLAGS += -Wchar-subscripts (-Wall does this)
-override CFLAGS += -Wmissing-prototypes
-override CFLAGS += -Wformat-security
-override CFLAGS += -Wformat=2
-override CFLAGS += -Wformat-nonliteral
-override CFLAGS += -Winit-self
-override CFLAGS += -Wswitch-default
-override CFLAGS += -Wstrict-prototypes
-override CFLAGS += -Wdeclaration-after-statement
-override CFLAGS += -Wold-style-definition
-override CFLAGS += -Wmissing-declarations
-override CFLAGS += -Wmissing-include-dirs
-override CFLAGS += -Wstrict-aliasing=3
-override CFLAGS += -Wunsafe-loop-optimizations
-override CFLAGS += -Winvalid-pch
+CFLAGS += -Wmissing-prototypes
+CFLAGS += -Wformat-security
+CFLAGS += -Wformat=2
+CFLAGS += -Wformat-nonliteral
+CFLAGS += -Winit-self
+CFLAGS += -Wswitch-default
+CFLAGS += -Wstrict-prototypes
+CFLAGS += -Wdeclaration-after-statement
+CFLAGS += -Wold-style-definition
+CFLAGS += -Wmissing-declarations
+CFLAGS += -Wmissing-include-dirs
+CFLAGS += -Wstrict-aliasing=3
+CFLAGS += -Wunsafe-loop-optimizations
+CFLAGS += -Winvalid-pch
 #CFLAGS += -Waddress  (-Wall does this)
-override CFLAGS += -Wvolatile-register-var
-override CFLAGS += -Wmissing-format-attribute
-override CFLAGS += -Wstack-protector
+CFLAGS += -Wvolatile-register-var
+CFLAGS += -Wmissing-format-attribute
+CFLAGS += -Wstack-protector
 #CFLAGS += -Werror (OBS build might have different compiler)
-override CFLAGS += -Wno-declaration-after-statement
+CFLAGS += -Wno-declaration-after-statement
+CFLAGS += -Wno-missing-field-initializers
+CFLAGS += -Wimplicit-fallthrough=2
 
 # Linker
 LDLIBS   += -Wl,--as-needed
@@ -265,16 +274,19 @@ LDLIBS   += -Wl,--as-needed
 # MCE
 # ----------------------------------------------------------------------------
 
+%.o : %.c
+	$(CC) -c -o $@ $< $(CPPFLAGS) $(CFLAGS)
+
 MCE_PKG_NAMES += gobject-2.0
 MCE_PKG_NAMES += glib-2.0
 MCE_PKG_NAMES += gio-2.0
 MCE_PKG_NAMES += gmodule-2.0
 MCE_PKG_NAMES += dbus-1
-MCE_PKG_NAMES += dbus-glib-1
 MCE_PKG_NAMES += dsme
 MCE_PKG_NAMES += libiphb
 MCE_PKG_NAMES += libsystemd
 MCE_PKG_NAMES += libngf0
+MCE_PKG_NAMES += thermalmanager_dbus_if
 
 MCE_PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(MCE_PKG_NAMES))
 MCE_PKG_LDLIBS := $(shell $(PKG_CONFIG) --libs   $(MCE_PKG_NAMES))
@@ -285,6 +297,7 @@ MCE_CFLAGS += $(MCE_PKG_CFLAGS)
 MCE_LDLIBS += $(MCE_PKG_LDLIBS)
 
 # These must be made callable from the plugins
+MCE_CORE += datapipe.c
 MCE_CORE += tklock.c
 MCE_CORE += modetransition.c
 MCE_CORE += powerkey.c
@@ -303,7 +316,6 @@ MCE_CORE += mce-hal.c
 MCE_CORE += mce-log.c
 MCE_CORE += mce-command-line.c
 MCE_CORE += mce-conf.c
-MCE_CORE += datapipe.c
 MCE_CORE += mce-modules.c
 MCE_CORE += multitouch.c
 MCE_CORE += mce-io.c
@@ -320,7 +332,9 @@ ifeq ($(strip $(ENABLE_WAKELOCKS)),y)
 MCE_CORE   += libwakelock.c
 endif
 
-mce : override CFLAGS += $(MCE_CFLAGS)
+MCE_CORE += $(DBUS_GMAIN_DIR)/dbus-gmain.c
+
+mce : CFLAGS += $(MCE_CFLAGS)
 mce : LDLIBS += $(MCE_LDLIBS)
 ifeq ($(ENABLE_HYBRIS),y)
 mce : LDLIBS += -ldl
@@ -331,6 +345,22 @@ CFLAGS  += -g
 LDFLAGS += -g
 
 # ----------------------------------------------------------------------------
+# DBUS_GMAIN
+# ----------------------------------------------------------------------------
+
+# The dbus-gmain submodule contains sources that have
+# issues and do not compile cleanly. As the content is
+# what it is, silence warnings etc when compiling source
+# files from there...
+
+DBUS_GMAIN_CPPFLAGS += -I.
+DBUS_GMAIN_CFLAGS   += -Wno-unused-parameter
+DBUS_GMAIN_CFLAGS   += -Wno-cast-function-type
+
+$(DBUS_GMAIN_DIR)/%.o : CPPFLAGS += $(DBUS_GMAIN_CPPFLAGS)
+$(DBUS_GMAIN_DIR)/%.o : CFLAGS   += $(DBUS_GMAIN_CFLAGS)
+
+# ----------------------------------------------------------------------------
 # MODULES
 # ----------------------------------------------------------------------------
 
@@ -338,7 +368,8 @@ MODULE_PKG_NAMES += gobject-2.0
 MODULE_PKG_NAMES += glib-2.0
 MODULE_PKG_NAMES += gmodule-2.0
 MODULE_PKG_NAMES += dbus-1
-MODULE_PKG_NAMES += dbus-glib-1
+MODULE_PKG_NAMES += usb_moded
+MODULE_PKG_NAMES += libudev
 
 MODULE_PKG_CFLAGS := $(shell $(PKG_CONFIG) --cflags $(MODULE_PKG_NAMES))
 MODULE_PKG_LDLIBS := $(shell $(PKG_CONFIG) --libs   $(MODULE_PKG_NAMES))
@@ -351,7 +382,7 @@ MODULE_LDLIBS += $(MODULE_PKG_LDLIBS)
 %.pic.o : %.c
 	$(CC) -c -o $@ $< -fPIC $(CPPFLAGS) $(CFLAGS)
 
-$(MODULE_DIR)/%.so : override CFLAGS += $(MODULE_CFLAGS)
+$(MODULE_DIR)/%.so : CFLAGS += $(MODULE_CFLAGS)
 $(MODULE_DIR)/%.so : LDLIBS += $(MODULE_LDLIBS)
 $(MODULE_DIR)/%.so : $(MODULE_DIR)/%.pic.o
 	$(CC) -shared -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -370,13 +401,17 @@ TOOLS_PKG_LDLIBS := $(shell $(PKG_CONFIG) --libs   $(TOOLS_PKG_NAMES))
 TOOLS_CFLAGS += $(TOOLS_PKG_CFLAGS)
 TOOLS_LDLIBS += $(TOOLS_PKG_LDLIBS)
 
-$(TOOLDIR)/mcetool : override CFLAGS += $(TOOLS_CFLAGS)
+$(TOOLDIR)/mcetool : CFLAGS += $(TOOLS_CFLAGS)
 $(TOOLDIR)/mcetool : LDLIBS += $(TOOLS_LDLIBS)
 $(TOOLDIR)/mcetool : $(TOOLDIR)/mcetool.o mce-command-line.o
 
-$(TOOLDIR)/evdev_trace : override CFLAGS += $(TOOLS_CFLAGS)
+$(TOOLDIR)/evdev_trace : CFLAGS += $(TOOLS_CFLAGS)
 $(TOOLDIR)/evdev_trace : LDLIBS += $(TOOLS_LDLIBS)
 $(TOOLDIR)/evdev_trace : $(TOOLDIR)/evdev_trace.o evdev.o $(TOOLDIR)/fileusers.o
+
+$(TOOLDIR)/dummy_compositor : CFLAGS += $(TOOLS_CFLAGS)
+$(TOOLDIR)/dummy_compositor : LDLIBS += $(TOOLS_LDLIBS)
+$(TOOLDIR)/dummy_compositor : $(TOOLDIR)/dummy_compositor.o $(DBUS_GMAIN_DIR)/dbus-gmain.o
 
 # ----------------------------------------------------------------------------
 # UNIT TESTS
@@ -384,7 +419,6 @@ $(TOOLDIR)/evdev_trace : $(TOOLDIR)/evdev_trace.o evdev.o $(TOOLDIR)/fileusers.o
 
 UTESTS_PKG_NAMES += check
 UTESTS_PKG_NAMES += dbus-1
-UTESTS_PKG_NAMES += dbus-glib-1
 UTESTS_PKG_NAMES += glib-2.0
 UTESTS_PKG_NAMES += gthread-2.0
 
@@ -397,7 +431,7 @@ UTESTS_LDLIBS += $(UTESTS_PKG_LDLIBS)
 UTESTS_CFLAGS += -fdata-sections -ffunction-sections
 UTESTS_LDLIBS += -Wl,--gc-sections
 
-$(UTESTDIR)/% : override CFLAGS += $(UTESTS_CFLAGS)
+$(UTESTDIR)/% : CFLAGS += $(UTESTS_CFLAGS)
 $(UTESTDIR)/% : LDLIBS += $(UTESTS_LDLIBS)
 $(UTESTDIR)/% : LDLIBS += $(foreach fn_sym,$(LINK_STUBS),\
 				    -Wl,--defsym=$(fn_sym)=stub__$(fn_sym))
@@ -408,6 +442,7 @@ $(UTESTDIR)/ut_display : LINK_STUBS += mce_write_string_to_file
 $(UTESTDIR)/ut_display : datapipe.o
 $(UTESTDIR)/ut_display : mce-lib.o
 $(UTESTDIR)/ut_display : modetransition.o
+$(UTESTDIR)/ut_display : $(DBUS_GMAIN_DIR)/dbus-gmain.o
 
 # ----------------------------------------------------------------------------
 # ACTIONS FOR TOP LEVEL TARGETS
@@ -451,6 +486,7 @@ install:: build
 	$(INSTALL_DTA) inifiles/mce.ini $(DESTDIR)$(CONFDIR)/$(CONFFILE)
 	$(INSTALL_DTA) inifiles/mce-radio-states.ini $(DESTDIR)$(CONFDIR)/$(RADIOSTATESCONFFILE)
 	$(INSTALL_DTA) inifiles/hybris-led.ini $(DESTDIR)$(CONFDIR)/20hybris-led.ini
+	$(INSTALL_DTA) inifiles/hybris-features.ini $(DESTDIR)$(CONFDIR)/20hybris-features.ini
 	$(INSTALL_DTA) inifiles/debug-led.ini $(DESTDIR)$(CONFDIR)/20debug-led.ini
 	$(INSTALL_DTA) inifiles/als-defaults.ini $(DESTDIR)$(CONFDIR)/20als-defaults.ini
 	$(INSTALL_DTA) inifiles/legacy.ini $(DESTDIR)$(CONFDIR)/11legacy.ini
@@ -518,10 +554,13 @@ fixme::
 # AUTOMATIC HEADER DEPENDENCIES
 # ----------------------------------------------------------------------------
 
+# All sources, except ones from gmain git submodule
+DEPEND_SOURCES = $(filter-out $(DBUS_GMAIN_DIR)/%.c, $(wildcard *.c */*.c */*/*.c))
+
 .PHONY: depend
 depend::
 	@echo "Updating .depend"
-	$(CC) -MM $(CPPFLAGS) $(MCE_CFLAGS) *.c */*.c */*/*.c |\
+	$(CC) -MM $(CPPFLAGS) $(MCE_CFLAGS) $(DEPEND_SOURCES) \
 	./depend_filter.py > .depend
 
 ifneq ($(MAKECMDGOALS),depend) # not while: make depend
@@ -538,6 +577,8 @@ NORMALIZE_USES_SPC =\
 	bme-dbus-names.h\
 	builtin-gconf.c\
 	builtin-gconf.h\
+	datapipe.c\
+	datapipe.h\
 	evdev.c\
 	evdev.h\
 	event-input.c\
@@ -549,6 +590,7 @@ NORMALIZE_USES_SPC =\
 	libwakelock.h\
 	mce-common.c\
 	mce-common.h\
+	mce-dbus.h\
 	mce-dsme.c\
 	mce-dsme.h\
 	mce-fbdev.c\
@@ -574,6 +616,7 @@ NORMALIZE_USES_SPC =\
 	modules/audiorouting.c\
 	modules/battery-upower.c\
 	modules/battery-statefs.c\
+	modules/battery-udev.c\
 	modules/bluetooth.c\
 	modules/buttonbacklight.c\
 	modules/callstate.c\
@@ -587,12 +630,15 @@ NORMALIZE_USES_SPC =\
 	modules/doubletap.h\
 	modules/filter-brightness-als.c\
 	modules/filter-brightness-als.h\
+	modules/fingerprint.c\
 	modules/keypad.h\
 	modules/inactivity.c\
+	modules/inactivity.h\
 	modules/memnotify.c\
 	modules/memnotify.h\
 	modules/packagekit.c\
 	modules/powersavemode.h\
+	modules/proximity.c\
 	modules/proximity.h\
 	modules/radiostates.h\
 	modules/sensor-gestures.c\
@@ -607,19 +653,17 @@ NORMALIZE_USES_SPC =\
 	tklock.c\
 	tklock.h\
 	tools/evdev_trace.c\
+	tools/dummy_compositor.c\
 	tools/mcetool.c\
 	tools/fileusers.c\
 	tools/fileusers.h\
 
 NORMALIZE_USES_TAB =\
-	datapipe.c\
-	datapipe.h\
 	event-switches.c\
 	libwakelock.c\
 	mce-conf.c\
 	mce-conf.h\
 	mce-dbus.c\
-	mce-dbus.h\
 	mce-setting.c\
 	mce-hal.c\
 	mce-hal.h\
@@ -640,7 +684,6 @@ NORMALIZE_USES_TAB =\
 	modules/led.c\
 	modules/led.h\
 	modules/powersavemode.c\
-	modules/proximity.c\
 	modules/radiostates.c\
 	systemui/tklock-dbus-names.h\
 
@@ -652,7 +695,8 @@ NORMALIZE_UNKNOWN = $(filter-out $(NORMALIZE_KNOWN), $(SOURCEFILES_ALL))
 
 normalize::
 	normalize_whitespace -M Makefile
-	normalize_whitespace -b -e -s $(NORMALIZE_USES_SPC)
+	normalize_whitespace -a inifiles/*.ini config/*.conf
+	normalize_whitespace -t -b -e -s $(NORMALIZE_USES_SPC)
 	normalize_whitespace -T -e -s $(NORMALIZE_USES_TAB)
 ifneq ($(NORMALIZE_UNKNOWN),)
 	@echo "Unknown source files: $(NORMALIZE_UNKNOWN)"
@@ -663,13 +707,28 @@ endif
 # DEVELOPMENT TIME PROTOTYPE SCANNING
 # ----------------------------------------------------------------------------
 
-.SUFFIXES: .q .p
+.SUFFIXES: .q .p .g
 
-%.q : %.c ; $(CC) -o $@ -E $< $(CPPFLAGS) $(MCE_CFLAGS)
-%.p : %.q ; cproto -s < $< | sed -e 's/_Bool/bool/g'
+PROTO_CPPFLAGS += $(CPPFLAGS)
+PROTO_CPPFLAGS += $(MCE_CFLAGS)
+PROTO_CPPFLAGS += $(MODULE_CFLAGS)
+PROTO_CPPFLAGS += -D_Float32=float
+PROTO_CPPFLAGS += -D_Float64=double
+PROTO_CPPFLAGS += -D_Float128="long double"
+PROTO_CPPFLAGS += -D_Float32x=float
+PROTO_CPPFLAGS += -D_Float64x=double
+PROTO_CPPFLAGS += -D_Float128x="long double"
+
+%.q : %.c ; $(CC) -o $@ -E $< $(PROTO_CPPFLAGS)
+%.p : %.q ; cproto -s < $< | prettyproto.py | tee $@
+%.g : %.q ; cproto < $< | prettyproto.py | tee $@
+
+protos-q: $(patsubst %.c,%.q,$(wildcard *.c modules/*.c))
+protos-p: $(patsubst %.c,%.p,$(wildcard *.c modules/*.c))
+protos-g: $(patsubst %.c,%.g,$(wildcard *.c modules/*.c))
 
 clean::
-	$(RM) -f *.[qp] modules/*.[qp] tools/*.[qp]
+	$(RM) -f *.[qpg] modules/*.[qpg] tools/*.[qpg]
 
 # ----------------------------------------------------------------------------
 # LOCAL RPMBUILD (copy mce.* from OBS to rpm subdir)

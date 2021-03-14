@@ -49,18 +49,14 @@
 #include "../mce.h"
 #include "../mce-log.h"
 
-#include <sys/types.h>
 #include <sys/epoll.h>
 
-#include <stdio.h>
-#include <stdbool.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
 #include <string.h>
 #include <stdlib.h>
 
-#include <glib.h>
 #include <gmodule.h>
 
 /* ========================================================================= *
@@ -117,6 +113,9 @@ static const char *repr_bool  (bool val);
  * ------------------------------------------------------------------------- */
 
 static void     bsf_datapipe_shutting_down_cb(gconstpointer data);
+static void     bsf_datapipe_heartbeat_event_cb(gconstpointer data);
+static void     bsf_datapipe_usb_cable_state_cb(gconstpointer data);
+static void     bsf_datapipe_resume_detected_event_cb(gconstpointer data);
 
 static void     bsf_datapipe_init(void);
 static void     bsf_datapipe_quit(void);
@@ -403,12 +402,65 @@ static void bsf_datapipe_shutting_down_cb(gconstpointer data)
     if( shutting_down == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "shutting_down = %d -> %d", prev, shutting_down);
+    mce_log(LL_DEBUG, "shutting_down = %d -> %d",
+            prev, shutting_down);
 
     /* Loss of statefs files is expected during shutdown */
 
 EXIT:
     return;
+}
+
+/** Change notifications for heartbeat_event_pipe
+ */
+static void bsf_datapipe_heartbeat_event_cb(gconstpointer data)
+{
+    (void)data;
+
+    mce_log(LL_DEBUG, "heartbeat");
+
+    /* HACK: Force all props to be reread on system heartbeat
+     *       i.e. periodically, when the device is awake anyway,
+     */
+    sfsctl_schedule_reread();
+}
+
+/** USB cable status; assume disconnected */
+static usb_cable_state_t usb_cable_state = USB_CABLE_UNDEF;
+
+/** Change notifications for usb_cable_state
+ */
+static void bsf_datapipe_usb_cable_state_cb(gconstpointer data)
+{
+    usb_cable_state_t prev = usb_cable_state;
+
+    usb_cable_state = GPOINTER_TO_INT(data);
+
+    if( prev == usb_cable_state )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "usb_cable_state = %s -> %s",
+            usb_cable_state_repr(prev),
+            usb_cable_state_repr(usb_cable_state));
+
+    /* HACK: Force all props to be reread when usb cable
+     *       state change is reported by usb-moded.
+     */
+    sfsctl_schedule_reread();
+
+EXIT:
+    return;
+}
+
+/** Resumed from suspend notification */
+static void bsf_datapipe_resume_detected_event_cb(gconstpointer data)
+{
+    (void) data;
+
+    mce_log(LL_DEBUG, "resume detected");
+
+    /* HACK: Force all props to be reread on resume */
+    sfsctl_schedule_reread();
 }
 
 /** Array of datapipe handlers */
@@ -418,6 +470,18 @@ static datapipe_handler_t bsf_datapipe_handlers[] =
     {
         .datapipe  = &shutting_down_pipe,
         .output_cb = bsf_datapipe_shutting_down_cb,
+    },
+    {
+        .datapipe  = &heartbeat_event_pipe,
+        .output_cb = bsf_datapipe_heartbeat_event_cb,
+    },
+    {
+        .datapipe  = &usb_cable_state_pipe,
+        .output_cb = bsf_datapipe_usb_cable_state_cb,
+    },
+    {
+        .datapipe  = &resume_detected_event_pipe,
+        .output_cb = bsf_datapipe_resume_detected_event_cb,
     },
 
     // sentinel
@@ -436,14 +500,14 @@ static datapipe_bindings_t bsf_datapipe_bindings =
  */
 static void bsf_datapipe_init(void)
 {
-    datapipe_bindings_init(&bsf_datapipe_bindings);
+    mce_datapipe_init_bindings(&bsf_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes
  */
 static void bsf_datapipe_quit(void)
 {
-    datapipe_bindings_quit(&bsf_datapipe_bindings);
+    mce_datapipe_quit_bindings(&bsf_datapipe_bindings);
 }
 
 /* ========================================================================= *
@@ -728,24 +792,20 @@ mcebat_update_cb(gpointer user_data)
                 charger_state_repr(mcebat.charger));
 
         /* Charger connected state */
-        execute_datapipe(&charger_state_pipe, GINT_TO_POINTER(mcebat.charger),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&charger_state_pipe, GINT_TO_POINTER(mcebat.charger));
 
         /* Charging led pattern */
         if( mcebat.charger == CHARGER_STATE_ON ) {
-            execute_datapipe_output_triggers(&led_pattern_activate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_CHARGING,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_activate_pipe,
+                               MCE_LED_PATTERN_BATTERY_CHARGING);
         }
         else {
-            execute_datapipe_output_triggers(&led_pattern_deactivate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_CHARGING,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_deactivate_pipe,
+                               MCE_LED_PATTERN_BATTERY_CHARGING);
         }
 
         /* Generate activity */
-        execute_datapipe(&device_inactive_event_pipe, GINT_TO_POINTER(FALSE),
-                         USE_INDATA, CACHE_OUTDATA);
+        mce_datapipe_generate_activity();
     }
 
     if( mcebat.status != prev.status ) {
@@ -755,35 +815,30 @@ mcebat_update_cb(gpointer user_data)
 
         /* Battery full led pattern */
         if( mcebat.status == BATTERY_STATUS_FULL ) {
-            execute_datapipe_output_triggers(&led_pattern_activate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_FULL,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_activate_pipe,
+                               MCE_LED_PATTERN_BATTERY_FULL);
         }
         else {
-            execute_datapipe_output_triggers(&led_pattern_deactivate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_FULL,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_deactivate_pipe,
+                               MCE_LED_PATTERN_BATTERY_FULL);
         }
 
 #if SUPPORT_BATTERY_LOW_LED_PATTERN
         /* Battery low led pattern */
         if( mcebat.status == BATTERY_STATUS_LOW ||
             mcebat.status == BATTERY_STATUS_EMPTY ) {
-            execute_datapipe_output_triggers(&led_pattern_activate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_LOW,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_activate_pipe,
+                               MCE_LED_PATTERN_BATTERY_LOW);
         }
         else {
-            execute_datapipe_output_triggers(&led_pattern_deactivate_pipe,
-                                             MCE_LED_PATTERN_BATTERY_LOW,
-                                             USE_INDATA);
+            datapipe_exec_full(&led_pattern_deactivate_pipe,
+                               MCE_LED_PATTERN_BATTERY_LOW);
         }
 #endif /* SUPPORT_BATTERY_LOW_LED_PATTERN */
 
         /* Battery charge state */
-        execute_datapipe(&battery_status_pipe,
-                         GINT_TO_POINTER(mcebat.status),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&battery_status_pipe,
+                           GINT_TO_POINTER(mcebat.status));
 
     }
 
@@ -791,9 +846,8 @@ mcebat_update_cb(gpointer user_data)
         mce_log(LL_NOTICE, "level: %d -> %d", prev.level, mcebat.level);
 
         /* Battery charge percentage */
-        execute_datapipe(&battery_level_pipe,
-                         GINT_TO_POINTER(mcebat.level),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&battery_level_pipe,
+                           GINT_TO_POINTER(mcebat.level));
     }
 
 cleanup:

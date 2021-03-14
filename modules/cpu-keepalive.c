@@ -1,14 +1,8 @@
-/* ------------------------------------------------------------------------- *
- * Copyright (C) 2013 Jolla Ltd.
- * Contact: Simo Piiroinen <simo.piiroinen@jollamobile.com>
- * License: LGPLv2
- * ------------------------------------------------------------------------- */
-
 /**
  * @file cpu-keepalive.c
  * cpu-keepalive module -- this implements late suspend blocking for MCE
  * <p>
- * Copyright © 2013 Jolla Ltd.
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
@@ -33,7 +27,6 @@
 # include "../libwakelock.h"
 #endif
 
-#include <stdint.h>
 #include <string.h>
 #include <inttypes.h>
 
@@ -1515,11 +1508,12 @@ static mce_dbus_handler_t cka_dbus_handlers[] =
       "    <arg direction=\"out\" name=\"success\" type=\"b\"/>\n"
   },
   {
-    .interface = MCE_REQUEST_IF,
-    .name      = MCE_CPU_KEEPALIVE_WAKEUP_REQ,
-    .type      = DBUS_MESSAGE_TYPE_METHOD_CALL,
-    .callback  = cka_dbus_handle_wakeup_cb,
-    .args      =
+    .interface  = MCE_REQUEST_IF,
+    .name       = MCE_CPU_KEEPALIVE_WAKEUP_REQ,
+    .type       = DBUS_MESSAGE_TYPE_METHOD_CALL,
+    .callback   = cka_dbus_handle_wakeup_cb,
+    .privileged = true,
+    .args       =
       "    <arg direction=\"out\" name=\"success\" type=\"b\"/>\n"
   },
   /* sentinel */

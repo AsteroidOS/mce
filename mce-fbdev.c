@@ -34,9 +34,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <errno.h>
-#include <time.h>
 
 /* ========================================================================= *
  * CONSTANTS
@@ -248,6 +246,7 @@ void mce_fbdev_set_suspend_mode(bool vsync_suspend)
     mce_log(LL_DEBUG, "fbdev suspend_mode %s", vsync_suspend ? "on" : "off");
     mce_fbdev_power_vsync_suspend = vsync_suspend;
 }
+
 /** Set the frame buffer power state
  *
  * MCE uses this function for display power control only if autosuspend

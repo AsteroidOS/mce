@@ -3,8 +3,12 @@
  * Headers for the display module
  * <p>
  * Copyright © 2007-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -122,6 +126,14 @@
  */
 # define BLANK_PREVENT_TIMEOUT                   60
 
+/** Blank prevent timeout slack, in seconds
+ *
+ * To allow clients to use exactly BLANK_PREVENT_TIMEOUT long
+ * renew period, make mce wait for renew requests a bit longer
+ * than that before automatically terminating blaning pause.
+ */
+# define BLANK_PREVENT_SLACK                      5
+
 /**
  * Default maximum brightness;
  * used if the maximum brightness cannot be read from SysFS
@@ -181,8 +193,6 @@
 /** Whether the wrist gesture sensor is available on the hardware */
 # define MCE_SETTING_WRIST_GESTURE_AVAILABLE            MCE_SETTING_DISPLAY_PATH "/wrist_sensor_available"
 # define MCE_DEFAULT_WRIST_GESTURE_AVAILABLE            1
-
-
 
 /* ------------------------------------------------------------------------- *
  * Color profile related settings

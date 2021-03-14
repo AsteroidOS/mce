@@ -5,10 +5,15 @@
  * This file implements a filter module for MCE
  * <p>
  * Copyright © 2007-2011 Nokia Corporation and/or its subsidiary(-ies).
- * Copyright © 2012-2015 Jolla Ltd.
+ * Copyright © 2012-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
  * @author Tuomo Tanskanen <ext-tuomo.1.tanskanen@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Victor Portnov <ext-victor.portnov@nokia.com>
+ * @author Kalle Jokiniemi <kalle.jokiniemi@jolla.com>
  * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
@@ -27,7 +32,6 @@
 #include "filter-brightness-als.h"
 #include "display.h"
 
-#include "../mce.h"
 #include "../mce-log.h"
 #include "../mce-io.h"
 #include "../mce-conf.h"
@@ -37,7 +41,6 @@
 #include "../mce-wakelock.h"
 #include "../tklock.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 #include <mce/dbus-names.h>
@@ -194,10 +197,10 @@ static void fba_als_filter_init            (void);
 static gpointer fba_datapipe_display_brightness_filter  (gpointer data);
 static gpointer fba_datapipe_led_brightness_filter      (gpointer data);
 static gpointer fba_datapipe_lpm_brightness_filter      (gpointer data);
-static gpointer fba_datapipe_key_backlight_filter       (gpointer data);
-static gpointer fba_datapipe_ambient_light_poll_filter  (gpointer data);
+static gpointer fba_datapipe_key_backlight_brightness_filter(gpointer data);
+static gpointer fba_datapipe_light_sensor_poll_request_filter(gpointer data);
 
-static void     fba_datapipe_display_state_trigger      (gconstpointer data);
+static void     fba_datapipe_display_state_curr_trigger (gconstpointer data);
 static void     fba_datapipe_display_state_next_trigger (gconstpointer data);
 
 static void     fba_datapipe_execute_brightness_change  (void);
@@ -808,9 +811,8 @@ fba_inputflt_sampling_output(int lux)
     fba_inputflt_output_lux = lux;
 
     /* Feed filtered sensor data to datapipe */
-    execute_datapipe(&ambient_light_level_pipe,
-                     GINT_TO_POINTER(fba_inputflt_output_lux),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&light_sensor_filtered_pipe,
+                       GINT_TO_POINTER(fba_inputflt_output_lux));
 
     fba_datapipe_execute_brightness_change();
 EXIT:
@@ -1188,14 +1190,14 @@ fba_als_filter_init(void)
  * DATAPIPE_TRACKING
  * ========================================================================= */
 
-/** Cached display state; tracked via fba_datapipe_display_state_trigger() */
-static display_state_t fba_display_state = MCE_DISPLAY_UNDEF;
+/** Cached display state; tracked via fba_datapipe_display_state_curr_trigger() */
+static display_state_t fba_display_state_curr = MCE_DISPLAY_UNDEF;
 
 /** Cached target display state; tracked via fba_datapipe_display_state_next_trigger() */
-static display_state_t fba_display_state_next = MCE_DISPLAY_UNDEF;
+static display_state_t fba_display_state_curr_next = MCE_DISPLAY_UNDEF;
 
-/** Cached als poll state; tracked via fba_datapipe_ambient_light_poll_filter() */
-static bool fba_ambient_light_poll = false;
+/** Cached als poll state; tracked via fba_datapipe_light_sensor_poll_request_filter() */
+static bool fba_light_sensor_polling = false;
 
 /**
  * Ambient Light Sensor filter for display brightness
@@ -1289,11 +1291,9 @@ fba_datapipe_lpm_brightness_filter(gpointer data)
     int max_prof = lut_lpm.profiles - 1;
 
     int prof = mce_xlat_int(1,100, 0,max_prof, value);
-
     /* Note: Input value is ignored and output is
      *       determined only by the als config */
     value = fba_als_filter_run(&lut_lpm, prof, fba_inputflt_output_lux);
-
 
 EXIT:
     return GINT_TO_POINTER(value);
@@ -1306,7 +1306,7 @@ EXIT:
  * @return The processed brightness value
  */
 static gpointer
-fba_datapipe_key_backlight_filter(gpointer data)
+fba_datapipe_key_backlight_brightness_filter(gpointer data)
 {
     int value = GPOINTER_TO_INT(data);
     int scale = 100;
@@ -1330,19 +1330,19 @@ EXIT:
  * @return Granted  sensor enable/disable bool (as void pointer)
  */
 static gpointer
-fba_datapipe_ambient_light_poll_filter(gpointer data)
+fba_datapipe_light_sensor_poll_request_filter(gpointer data)
 {
-    bool prev = fba_ambient_light_poll;
-    fba_ambient_light_poll = GPOINTER_TO_INT(data);
+    bool prev = fba_light_sensor_polling;
+    fba_light_sensor_polling = GPOINTER_TO_INT(data);
 
     if( !fba_setting_als_enabled )
-        fba_ambient_light_poll = FALSE;
+        fba_light_sensor_polling = FALSE;
 
-    if( fba_ambient_light_poll == prev )
+    if( fba_light_sensor_polling == prev )
         goto EXIT;
 
-    mce_log(LL_DEVEL, "ambient_light_poll = %s",
-            fba_ambient_light_poll ? "true" : "false");
+    mce_log(LL_DEVEL, "light_sensor_polling = %s",
+            fba_light_sensor_polling ? "true" : "false");
 
     /* Sensor status is affected only if the value changes */
     fba_status_rethink();
@@ -1353,7 +1353,7 @@ EXIT:
      * if the value does not change. */
     fba_sensorpoll_rethink();
 
-    return GINT_TO_POINTER(fba_ambient_light_poll);
+    return GINT_TO_POINTER(fba_light_sensor_polling);
 }
 
 /**
@@ -1362,17 +1362,17 @@ EXIT:
  * @param data The display stated stored in a pointer
  */
 static void
-fba_datapipe_display_state_trigger(gconstpointer data)
+fba_datapipe_display_state_curr_trigger(gconstpointer data)
 {
-    display_state_t prev = fba_display_state;
-    fba_display_state = GPOINTER_TO_INT(data);
+    display_state_t prev = fba_display_state_curr;
+    fba_display_state_curr = GPOINTER_TO_INT(data);
 
-    if( prev == fba_display_state )
+    if( prev == fba_display_state_curr )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "display_state: %s -> %s",
+    mce_log(LL_DEBUG, "display_state_curr: %s -> %s",
             display_state_repr(prev),
-            display_state_repr(fba_display_state));
+            display_state_repr(fba_display_state_curr));
 
     fba_status_rethink();
 
@@ -1383,15 +1383,15 @@ EXIT:
 static void
 fba_datapipe_display_state_next_trigger(gconstpointer data)
 {
-    display_state_t prev = fba_display_state_next;
-    fba_display_state_next = GPOINTER_TO_INT(data);
+    display_state_t prev = fba_display_state_curr_next;
+    fba_display_state_curr_next = GPOINTER_TO_INT(data);
 
-    if( prev == fba_display_state_next )
+    if( prev == fba_display_state_curr_next )
         goto EXIT;
 
     mce_log(LL_DEBUG, "display_state_next: %s -> %s",
             display_state_repr(prev),
-            display_state_repr(fba_display_state_next));
+            display_state_repr(fba_display_state_curr_next));
 
     fba_status_rethink();
 
@@ -1403,14 +1403,14 @@ static void
 fba_datapipe_execute_brightness_change(void)
 {
     /* Re-filter the brightness */
-    execute_datapipe(&display_brightness_pipe, NULL,
-                     USE_CACHE, DONT_CACHE_INDATA);
-    execute_datapipe(&led_brightness_pipe, NULL,
-                     USE_CACHE, DONT_CACHE_INDATA);
-    execute_datapipe(&lpm_brightness_pipe, NULL,
-                     USE_CACHE, DONT_CACHE_INDATA);
-    execute_datapipe(&key_backlight_pipe, NULL,
-                     USE_CACHE, DONT_CACHE_INDATA);
+    datapipe_exec_full(&display_brightness_pipe,
+                       datapipe_value(&display_brightness_pipe));
+    datapipe_exec_full(&led_brightness_pipe,
+                       datapipe_value(&led_brightness_pipe));
+    datapipe_exec_full(&lpm_brightness_pipe,
+                       datapipe_value(&lpm_brightness_pipe));
+    datapipe_exec_full(&key_backlight_brightness_pipe,
+                       datapipe_value(&key_backlight_brightness_pipe));
 }
 
 /** Array of datapipe handlers */
@@ -1430,12 +1430,12 @@ static datapipe_handler_t fba_datapipe_handlers[] =
         .filter_cb = fba_datapipe_lpm_brightness_filter,
     },
     {
-        .datapipe  = &key_backlight_pipe,
-        .filter_cb = fba_datapipe_key_backlight_filter,
+        .datapipe  = &key_backlight_brightness_pipe,
+        .filter_cb = fba_datapipe_key_backlight_brightness_filter,
     },
     {
-        .datapipe  = &ambient_light_poll_pipe,
-        .filter_cb = fba_datapipe_ambient_light_poll_filter,
+        .datapipe  = &light_sensor_poll_request_pipe,
+        .filter_cb = fba_datapipe_light_sensor_poll_request_filter,
     },
 
     // output triggers
@@ -1444,8 +1444,8 @@ static datapipe_handler_t fba_datapipe_handlers[] =
         .output_cb = fba_datapipe_display_state_next_trigger,
     },
     {
-        .datapipe  = &display_state_pipe,
-        .output_cb = fba_datapipe_display_state_trigger,
+        .datapipe  = &display_state_curr_pipe,
+        .output_cb = fba_datapipe_display_state_curr_trigger,
     },
 
     // sentinel
@@ -1465,7 +1465,7 @@ static datapipe_bindings_t fba_datapipe_bindings =
 static void
 fba_datapipe_init(void)
 {
-    datapipe_bindings_init(&fba_datapipe_bindings);
+    mce_datapipe_init_bindings(&fba_datapipe_bindings);
 }
 
 /** Remove datapipe triggers/filters
@@ -1473,7 +1473,7 @@ fba_datapipe_init(void)
 static void
 fba_datapipe_quit(void)
 {
-    datapipe_bindings_quit(&fba_datapipe_bindings);
+    mce_datapipe_quit_bindings(&fba_datapipe_bindings);
 }
 
 /* ========================================================================= *
@@ -1699,9 +1699,8 @@ fba_status_sensor_value_change_cb(int lux)
     fba_inputflt_sampling_input(fba_status_sensor_lux);
 
     /* Feed raw sensor data to datapipe */
-    execute_datapipe(&ambient_light_sensor_pipe,
-                     GINT_TO_POINTER(fba_status_sensor_lux),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&light_sensor_actual_pipe,
+                       GINT_TO_POINTER(fba_status_sensor_lux));
 }
 
 static bool
@@ -1709,7 +1708,7 @@ fba_status_sensor_is_needed(void)
 {
     bool need_als = false;
 
-    switch( fba_display_state_next ) {
+    switch( fba_display_state_curr_next ) {
     case MCE_DISPLAY_ON:
     case MCE_DISPLAY_DIM:
     case MCE_DISPLAY_LPM_OFF:
@@ -1738,7 +1737,7 @@ fba_status_rethink(void)
     bool       enable_new = false;
 
     if( fba_setting_als_enabled )
-        enable_new = (fba_ambient_light_poll ||
+        enable_new = (fba_light_sensor_polling ||
                       fba_status_sensor_is_needed());
 
     if( fba_module_unload )
@@ -1757,10 +1756,11 @@ fba_status_rethink(void)
     enable_old = enable_new;
 
     if( enable_new ) {
-        /* Enable change notifications */
-        mce_sensorfw_als_set_notify(fba_status_sensor_value_change_cb);
-
+        /* Enable sensor before attaching notification callback.
+         * So that the last seen light sensor reading is made active
+         * again and reported instead of the fallback/default value. */
         mce_sensorfw_als_enable();
+        mce_sensorfw_als_set_notify(fba_status_sensor_value_change_cb);
 
         /* The sensor has been off for some time, so the
          * history needs to be forgotten when we get fresh
@@ -1791,7 +1791,7 @@ EXIT:
     }
 
     /* Block device from suspending while temporary ALS poll is active */
-    if( enable_new && fba_ambient_light_poll )
+    if( enable_new && fba_light_sensor_polling )
         mce_wakelock_obtain("als_poll", -1);
     else
         mce_wakelock_release("als_poll");
@@ -1823,9 +1823,8 @@ fba_sensorpoll_timer_cb(gpointer aptr)
     mce_log(LL_DEBUG, "als poll: %s", "timeout");
 
     fba_sensorpoll_timer_id = 0;
-    execute_datapipe(&ambient_light_poll_pipe,
-                     GINT_TO_POINTER(false),
-                     USE_INDATA, CACHE_OUTDATA);
+    datapipe_exec_full(&light_sensor_poll_request_pipe,
+                       GINT_TO_POINTER(false));
 EXIT:
     return FALSE;
 }
@@ -1868,7 +1867,7 @@ EXIT:
  */
 static void fba_sensorpoll_rethink(void)
 {
-    if( fba_ambient_light_poll )
+    if( fba_light_sensor_polling )
         fba_sensorpoll_start();
     else
         fba_sensorpoll_stop();

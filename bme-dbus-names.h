@@ -1,36 +1,60 @@
 /**
  * @file bme-dbus-names.h
+ * Mode Control Entity - D-Bus constants related to BME service
+ * <p>
+ * Copyright (C) 2010-2011 Nokia Corporation.  All rights reserved.
+ * Copyright (C) 2018-2019 Jolla Ltd.
+ * <p>
+ * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ *
+ * mce is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
+ *
+ * mce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/**
+ * @file bme-dbus-names.h
  */
 #ifndef _BME_DBUS_NAMES_H_
 #define _BME_DBUS_NAMES_H_
 
-#define DBUS_BROADCAST			"org.freedesktop.DBus.Broadcast"
+#define DBUS_BROADCAST                  "org.freedesktop.DBus.Broadcast"
 
-#define BME_SERVICE			"com.nokia.bme"
+#define BME_SERVICE                     "com.nokia.bme"
 
-#define BME_REQUEST_IF			"com.nokia.bme.request"
-#define BME_REQUEST_PATH		"/com/nokia/bme/request"
+#define BME_REQUEST_IF                  "com.nokia.bme.request"
+#define BME_REQUEST_PATH                "/com/nokia/bme/request"
 
-#define BME_SIGNAL_IF			"com.nokia.bme.signal"
-#define BME_SIGNAL_PATH			"/com/nokia/bme/signal"
+#define BME_SIGNAL_IF                   "com.nokia.bme.signal"
+#define BME_SIGNAL_PATH                 "/com/nokia/bme/signal"
 
-#define BME_ERROR_FATAL			"com.nokia.bme.error.fatal"
-#define BME_ERROR_INVALID_ARGS		"org.freedesktop.DBus.Error.InvalidArgs"
+#define BME_ERROR_FATAL                 "com.nokia.bme.error.fatal"
+#define BME_ERROR_INVALID_ARGS          "org.freedesktop.DBus.Error.InvalidArgs"
 
-#define BME_BATTERY_STATE_UPDATE	"battery_state_changed"
-#define BME_BATTERY_FULL		"battery_full"
-#define BME_BATTERY_OK			"battery_ok"
-#define BME_BATTERY_LOW			"battery_low"
-#define BME_BATTERY_EMPTY		"battery_empty"
-#define BME_BATTERY_TIMELEFT		"battery_timeleft"
+#define BME_BATTERY_STATE_UPDATE        "battery_state_changed"
+#define BME_BATTERY_FULL                "battery_full"
+#define BME_BATTERY_OK                  "battery_ok"
+#define BME_BATTERY_LOW                 "battery_low"
+#define BME_BATTERY_EMPTY               "battery_empty"
+#define BME_BATTERY_TIMELEFT            "battery_timeleft"
 
-#define BME_CHARGER_CONNECTED		"charger_connected"
-#define BME_CHARGER_DISCONNECTED	"charger_disconnected"
-#define BME_CHARGER_CHARGING_ON		"charger_charging_on"
-#define BME_CHARGER_CHARGING_OFF	"charger_charging_off"
-#define BME_CHARGER_CHARGING_FAILED	"charger_charging_failed"
+#define BME_CHARGER_CONNECTED           "charger_connected"
+#define BME_CHARGER_DISCONNECTED        "charger_disconnected"
+#define BME_CHARGER_CHARGING_ON         "charger_charging_on"
+#define BME_CHARGER_CHARGING_OFF        "charger_charging_off"
+#define BME_CHARGER_CHARGING_FAILED     "charger_charging_failed"
 
-#define BME_STATUS_INFO_REQ		"status_info_req"
-#define BME_TIMELEFT_INFO_REQ		"timeleft_info_req"
+#define BME_STATUS_INFO_REQ             "status_info_req"
+#define BME_TIMELEFT_INFO_REQ           "timeleft_info_req"
 
 #endif /* _BME_DBUS_NAMES_H_ */

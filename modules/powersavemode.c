@@ -3,9 +3,14 @@
  * Power saving mode module -- this handles the power saving mode
  * for MCE
  * <p>
- * Copyright © 2010-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2010 - 2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2014 - 2020 Jolla Ltd.
+ * Copyright (c) 2020 Open Mobile Platform LLC.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -28,6 +33,7 @@
 #include "../mce-dbus.h"
 
 #include <mce/dbus-names.h>
+#include <mce/mode-names.h>
 
 #include <gmodule.h>
 
@@ -47,8 +53,9 @@ G_MODULE_EXPORT module_info_struct module_info = {
 	.priority = 250
 };
 
-/** Battery charge level */
-static gint battery_level = 100;
+/** Battery charge level: assume unknown == -1 */
+static gint battery_level = MCE_BATTERY_LEVEL_UNKNOWN;
+
 /** Charger state */
 static charger_state_t charger_state = CHARGER_STATE_UNDEF;
 
@@ -65,7 +72,7 @@ static gint  psm_threshold = MCE_DEFAULT_EM_PSM_THRESHOLD;
 static guint psm_threshold_setting_id = 0;
 
 /** Active power saving mode */
-static gboolean active_power_saving_mode = FALSE;
+static bool active_power_saving_mode = false;
 
 /** Device thermal state */
 static thermal_state_t thermal_state = THERMAL_STATE_UNDEF;
@@ -97,9 +104,11 @@ static gboolean send_psm_state(DBusMessage *const method_call)
 				      MCE_PSM_STATE_SIG);
 	}
 
+	dbus_bool_t arg = active_power_saving_mode;
+
 	/* Append the power saving mode */
 	if (dbus_message_append_args(msg,
-				     DBUS_TYPE_BOOLEAN, &active_power_saving_mode,
+				     DBUS_TYPE_BOOLEAN, &arg,
 				     DBUS_TYPE_INVALID) == FALSE) {
 		mce_log(LL_CRIT,
 			"Failed to append %sargument to D-Bus message "
@@ -125,31 +134,44 @@ EXIT:
  */
 static void update_power_saving_mode(void)
 {
-	gint new_power_saving_mode;
+	bool activate = false;
 
-	/* XXX: later on we should make overheating another
-	 *      trigger for power saving mode too
-	 */
-	if (((((battery_level <= psm_threshold) &&
-	       (power_saving_mode == TRUE)) ||
-	      (force_psm == TRUE)) &&
-	     (charger_state != CHARGER_STATE_ON)) ||
-	    (thermal_state == THERMAL_STATE_OVERHEATED)) {
-		/* If the battery charge level is lower than the threshold,
-		 * and the user has enable power saving mode,
-		 * or if the device is overheated,
-		 * activate low power mode
-		 */
-		new_power_saving_mode = TRUE;
-	} else {
-		new_power_saving_mode = FALSE;
+	if( thermal_state == THERMAL_STATE_OVERHEATED ) {
+		/* If device overheats, PSM is triggered regardless
+		 * of other settings and states. */
+		activate = true;
+	}
+	else if ( battery_level <= MCE_BATTERY_LEVEL_UNKNOWN ) {
+		/* Ignore triggers based on charger and battery
+		 * info until battery level becomes known. */
+	}
+	else if( charger_state == CHARGER_STATE_ON ) {
+		/* If charger is connected, PSM should be deactivated. */
+	}
+	else if( force_psm ) {
+		/* Forced PSM is triggered when no charger is connected. */
+		if( charger_state == CHARGER_STATE_UNDEF )
+			mce_log(LL_DEBUG, "charger state unknown; "
+				"not activating forced-psm");
+		else
+			activate = true;
+	}
+	else if( power_saving_mode && battery_level <= psm_threshold ) {
+		/* Normally PSM is triggered when the feature is enabled and
+		 * battery level is not over the threshold. */
+		if( charger_state == CHARGER_STATE_UNDEF )
+			mce_log(LL_DEBUG, "charger state unknown; "
+				"not activating psm");
+		else
+			activate = true;
 	}
 
-	if (active_power_saving_mode != new_power_saving_mode) {
-		active_power_saving_mode = new_power_saving_mode;
-		(void)execute_datapipe(&power_saving_mode_pipe,
-				       GINT_TO_POINTER(active_power_saving_mode),
-				       USE_INDATA, CACHE_INDATA);
+	if( active_power_saving_mode != activate ) {
+		active_power_saving_mode = activate;
+		mce_log(LL_DEBUG, "power_saving_mode: %s",
+			active_power_saving_mode ? "activated" : "deactivated");
+		datapipe_exec_full(&power_saving_mode_active_pipe,
+				   GINT_TO_POINTER(active_power_saving_mode));
 		send_psm_state(NULL);
 	}
 }
@@ -161,9 +183,18 @@ static void update_power_saving_mode(void)
  */
 static void battery_level_trigger(gconstpointer const data)
 {
+	gint prev = battery_level;
 	battery_level = GPOINTER_TO_INT(data);
 
+	if( prev == battery_level )
+		goto EXIT;
+
+	mce_log(LL_DEBUG, "battery_level: %d -> %d", prev, battery_level);
+
 	update_power_saving_mode();
+
+EXIT:
+	return;
 }
 
 /**
@@ -173,9 +204,33 @@ static void battery_level_trigger(gconstpointer const data)
  */
 static void charger_state_trigger(gconstpointer const data)
 {
+	charger_state_t prev = charger_state;
 	charger_state = GPOINTER_TO_INT(data);
 
+	if( prev == charger_state )
+		goto EXIT;
+
+	mce_log(LL_DEBUG, "charger_state: %s -> %s",
+		charger_state_repr(prev),
+		charger_state_repr(charger_state));
+
+	/* Disable forced-psm on charger connect - but ignore
+	 * undef -> on transitions that are expected to happen
+	 * on mce startup. */
+	if( force_psm &&
+	    prev == CHARGER_STATE_OFF &&
+	    charger_state == CHARGER_STATE_ON ) {
+		mce_log(LL_DEBUG, "autodisable forced-power-save-mode");
+		/* Change cached value before changing the setting
+		 * value to avoid repeated state evaluation. */
+		force_psm = false;
+		mce_setting_set_bool(MCE_SETTING_EM_FORCED_PSM, false);
+	}
+
 	update_power_saving_mode();
+
+EXIT:
+	return;
 }
 
 /**
@@ -186,9 +241,20 @@ static void charger_state_trigger(gconstpointer const data)
  */
 static void thermal_state_trigger(gconstpointer const data)
 {
+	thermal_state_t prev = thermal_state;
 	thermal_state = GPOINTER_TO_INT(data);
 
+	if( prev == thermal_state )
+		goto EXIT;
+
+	mce_log(LL_DEBUG, "thermal_state: %s -> %s",
+		thermal_state_repr(prev),
+		thermal_state_repr(thermal_state));
+
 	update_power_saving_mode();
+
+EXIT:
+	return;
 }
 
 /**
@@ -216,14 +282,20 @@ static void psm_setting_cb(GConfClient *const gcc, const guint id,
 	}
 
 	if (id == power_saving_mode_setting_id) {
+		gboolean prev = power_saving_mode;
 		power_saving_mode = gconf_value_get_bool(gcv);
-		update_power_saving_mode();
+		if( prev != power_saving_mode )
+			update_power_saving_mode();
 	} else if (id == force_psm_setting_id) {
+		gboolean prev = force_psm;
 		force_psm = gconf_value_get_bool(gcv);
-		update_power_saving_mode();
+		if( prev != force_psm )
+			update_power_saving_mode();
 	} else if (id == psm_threshold_setting_id) {
+		gint prev = psm_threshold;
 		psm_threshold = gconf_value_get_int(gcv);
-		update_power_saving_mode();
+		if( prev != psm_threshold )
+			update_power_saving_mode();
 	} else {
 		mce_log(LL_WARN,
 			"Spurious GConf value received; confused!");
@@ -296,6 +368,48 @@ static void mce_psm_quit_dbus(void)
 	mce_dbus_handler_unregister_array(psm_dbus_handlers);
 }
 
+/** Array of datapipe handlers */
+static datapipe_handler_t mce_psm_datapipe_handlers[] =
+{
+	// output triggers
+	{
+		.datapipe  = &battery_level_pipe,
+		.output_cb = battery_level_trigger,
+	},
+	{
+		.datapipe  = &charger_state_pipe,
+		.output_cb = charger_state_trigger,
+	},
+	{
+		.datapipe  = &thermal_state_pipe,
+		.output_cb = thermal_state_trigger,
+	},
+	// sentinel
+	{
+		.datapipe  = 0,
+	}
+};
+
+static datapipe_bindings_t mce_psm_datapipe_bindings =
+{
+	.module   = "mce_psm",
+	.handlers = mce_psm_datapipe_handlers,
+};
+
+/** Append triggers/filters to datapipes
+ */
+static void mce_psm_datapipe_init(void)
+{
+	mce_datapipe_init_bindings(&mce_psm_datapipe_bindings);
+}
+
+/** Remove triggers/filters from datapipes
+ */
+static void mce_psm_datapipe_quit(void)
+{
+	mce_datapipe_quit_bindings(&mce_psm_datapipe_bindings);
+}
+
 /**
  * Init function for the power saving mode module
  *
@@ -310,46 +424,34 @@ const gchar *g_module_check_init(GModule *module)
 	(void)module;
 
 	/* Append triggers/filters to datapipes */
-	append_output_trigger_to_datapipe(&battery_level_pipe,
-					  battery_level_trigger);
-	append_output_trigger_to_datapipe(&charger_state_pipe,
-					  charger_state_trigger);
-	append_output_trigger_to_datapipe(&thermal_state_pipe,
-					  thermal_state_trigger);
+	mce_psm_datapipe_init();
 
 	/* Power saving mode setting */
-	/* Since we've set a default, error handling is unnecessary */
-	mce_setting_notifier_add(MCE_SETTING_EM_PATH,
-				 MCE_SETTING_EM_ENABLE_PSM,
-				 psm_setting_cb,
-				 &power_saving_mode_setting_id);
-
-	mce_setting_get_bool(MCE_SETTING_EM_ENABLE_PSM,
-			     &power_saving_mode);
+	mce_setting_track_bool(MCE_SETTING_EM_ENABLE_PSM,
+			       &power_saving_mode,
+			       MCE_DEFAULT_EM_ENABLE_PSM,
+			       psm_setting_cb,
+			       &power_saving_mode_setting_id);
 
 	/* Forced power saving mode setting */
-	/* Since we've set a default, error handling is unnecessary */
-	mce_setting_notifier_add(MCE_SETTING_EM_PATH,
-				 MCE_SETTING_EM_FORCED_PSM,
-				 psm_setting_cb,
-				 &force_psm_setting_id);
-
-	mce_setting_get_bool(MCE_SETTING_EM_FORCED_PSM,
-			     &force_psm);
+	mce_setting_track_bool(MCE_SETTING_EM_FORCED_PSM,
+			       &force_psm,
+			       MCE_DEFAULT_EM_FORCED_PSM,
+			       psm_setting_cb,
+			       &force_psm_setting_id);
 
 	/* Power saving mode threshold */
-	/* Since we've set a default, error handling is unnecessary */
-	mce_setting_notifier_add(MCE_SETTING_EM_PATH,
-				 MCE_SETTING_EM_PSM_THRESHOLD,
-				 psm_setting_cb,
-				 &psm_threshold_setting_id);
-
-	mce_setting_get_int(MCE_SETTING_EM_PSM_THRESHOLD,
-			    &psm_threshold);
+	mce_setting_track_int(MCE_SETTING_EM_PSM_THRESHOLD,
+			      &psm_threshold,
+			      MCE_DEFAULT_EM_PSM_THRESHOLD,
+			      psm_setting_cb,
+			      &psm_threshold_setting_id);
 
 	/* Add dbus handlers */
 	mce_psm_init_dbus();
 
+	/* Explicitly evaluate initial state */
+	update_power_saving_mode();
 	return NULL;
 }
 
@@ -379,12 +481,7 @@ void g_module_unload(GModule *module)
 	mce_psm_quit_dbus();
 
 	/* Remove triggers/filters from datapipes */
-	remove_output_trigger_from_datapipe(&thermal_state_pipe,
-					    thermal_state_trigger);
-	remove_output_trigger_from_datapipe(&battery_level_pipe,
-					    battery_level_trigger);
-	remove_output_trigger_from_datapipe(&charger_state_pipe,
-					    charger_state_trigger);
+	mce_psm_datapipe_quit();
 
 	return;
 }

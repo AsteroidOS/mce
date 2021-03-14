@@ -1,9 +1,17 @@
 /** @file mcetool.c
  * Tool to test and remote control the Mode Control Entity
  * <p>
- * Copyright © 2005-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2005 - 2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2012 - 2020 Jolla Ltd.
+ * Copyright (c) 2019 - 2020 Open Mobile Platform LLC.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Victor Portnov <ext-victor.portnov@nokia.com>
+ * @author Philippe De Swert <philippe.deswert@jollamobile.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ * @author Vesa Halttunen <vesa.halttunen@jollamobile.com>
+ * @author Kimmo Lindholm <kimmo.lindholm@eke.fi>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -19,13 +27,16 @@
  */
 
 #include "../mce-command-line.h"
+#include "../mce-dbus.h"
+#include "../mce-setting.h"
 #include "../tklock.h"
 #include "../powerkey.h"
 #include "../event-input.h"
+#include "../evdev.h"
 #include "../modules/display.h"
 #include "../modules/doubletap.h"
+#include "../modules/inactivity.h"
 #include "../modules/powersavemode.h"
-#include "../modules/filter-brightness-als.h"
 #include "../modules/proximity.h"
 #include "../modules/memnotify.h"
 #include "../modules/led.h"
@@ -65,6 +76,383 @@
 #endif
 
 # define errorf(FMT, ARGS...) fprintf(stderr, PROG_NAME": E: "FMT, ##ARGS)
+
+/* ========================================================================= *
+ * Types
+ * ========================================================================= */
+
+/* ------------------------------------------------------------------------- *
+ * SYMBOL LOOKUP TABLES
+ * ------------------------------------------------------------------------- */
+
+/** Simple string key to integer value symbol */
+typedef struct
+{
+        /** Name of the symbol, or NULL to mark end of symbol table */
+        const char *key;
+
+        /** Value of the symbol */
+        int         val;
+} symbol_t;
+
+/* ========================================================================= *
+ * Prototypes
+ * ========================================================================= */
+
+/* ------------------------------------------------------------------------- *
+ * XDBUS
+ * ------------------------------------------------------------------------- */
+
+static DBusConnection  *xdbus_init   (void);
+static void             xdbus_exit   (void);
+static gboolean         xdbus_call_va(const gchar *const service, const gchar *const path, const gchar *const interface, const gchar *const name, DBusMessage **reply, int arg_type, va_list va);
+
+/* ------------------------------------------------------------------------- *
+ * XMCE
+ * ------------------------------------------------------------------------- */
+
+static gboolean      xmce_ipc_va                                       (const gchar *const name, DBusMessage **reply, int arg_type, va_list va);
+#ifdef ENABLE_BATTERY_SIMULATION
+static gboolean      xmce_ipc                                          (const gchar *const name, DBusMessage **reply, int arg_type, ...);
+#endif
+static gboolean      xmce_ipc_no_reply                                 (const gchar *const name, int arg_type, ...);
+static gboolean      xmce_ipc_message_reply                            (const gchar *const name, DBusMessage **reply, int arg_type, ...);
+static gboolean      xmce_ipc_string_reply                             (const gchar *const name, char **result, int arg_type, ...);
+static gboolean      xmce_ipc_uint_reply                               (const gchar *const name, guint *result, int arg_type, ...);
+static gboolean      xmce_ipc_int_reply                                (const gchar *const name, gint *result, int arg_type, ...);
+static gboolean      xmce_ipc_bool_reply                               (const gchar *const name, gboolean *result, int arg_type, ...);
+static DBusMessage  *xmce_setting_request                              (const gchar *const method);
+static gboolean      xmce_setting_get_bool                             (const gchar *const key, gboolean *value);
+static gboolean      xmce_setting_get_int                              (const gchar *const key, gint *value);
+static gboolean      xmce_setting_get_string                           (const gchar *const key, gchar **value);
+static gboolean      xmce_setting_get_int_array                        (const gchar *const key, gint **values, gint *count);
+static gboolean      xmce_setting_set_bool                             (const gchar *const key, const gboolean value);
+static gboolean      xmce_setting_set_int                              (const gchar *const key, const gint value);
+static gboolean      xmce_setting_set_string                           (const gchar *const key, const char *value);
+static gboolean      xmce_setting_set_int_array                        (const gchar *const key, const gint *values, gint count);
+static int           xmce_parse_powerkeyevent                          (const char *args);
+static unsigned      xmce_parse_radio_states                           (const char *args);
+static gboolean      xmce_parse_enabled                                (const char *args);
+static int           xmce_parse_integer                                (const char *args);
+static double        xmce_parse_double                                 (const char *args);
+static bool          xmce_set_verbosity                                (const char *arg);
+static void          xmce_get_verbosity                                (void);
+static bool          xmce_get_color_profile_ids                        (const char *arg);
+static bool          xmce_set_color_profile                            (const char *args);
+static void          xmce_get_color_profile                            (void);
+#ifdef ENABLE_BATTERY_SIMULATION
+static bool          xmce_set_charger_type                             (const char *type);
+static bool          xmce_set_charger_state                            (const char *state);
+static bool          xmce_set_battery_level                            (int level);
+#endif
+static void          xmce_get_cable_state                              (void);
+static void          xmce_get_charger_state                            (void);
+static void          xmce_get_battery_status                           (void);
+static void          xmce_get_battery_state                            (void);
+static void          xmce_get_battery_level                            (void);
+static void          xmce_get_battery_info                             (void);
+static void          xmce_parse_notification_args                      (const char *args, char **title, dbus_int32_t *delay, dbus_int32_t *renew);
+static bool          xmce_notification_begin                           (const char *args);
+static bool          xmce_notification_end                             (const char *args);
+static bool          xmce_enable_radio                                 (const char *args);
+static bool          xmce_disable_radio                                (const char *args);
+static void          xmce_get_radio_states                             (void);
+static bool          xmce_set_lpmui_triggering                         (const char *args);
+static void          xmce_get_lpmui_triggering                         (void);
+static bool          xmce_set_input_grab_allowed                       (const char *args);
+static void          xmce_get_input_grab_allowed                       (void);
+static bool          xmce_set_call_state                               (const char *args);
+static void          xmce_get_call_state                               (void);
+static bool          xmce_set_button_backlligut_off_delay              (const char *args);
+static void          xmce_get_button_backlligut_off_delay              (void);
+static bool          xmce_set_button_backlight_mode                    (const char *args);
+static bool          xmce_set_button_backlight                         (const char *args);
+static void          xmce_get_button_backlight                         (void);
+static void          xmce_set_display_state                            (const char *state);
+static void          xmce_get_display_state                            (void);
+static bool          xmce_prevent_display_blanking                     (const char *arg);
+static bool          xmce_allow_display_blanking                       (const char *arg);
+static bool          xmce_set_blank_prevent_mode                       (const char *args);
+static void          xmce_get_blank_prevent_mode                       (void);
+static bool          xmce_set_display_brightness                       (const char *args);
+static void          xmce_get_display_brightness                       (void);
+static bool          xmce_set_dimmed_brightness_static                 (const char *args);
+static void          xmce_get_dimmed_brightness_static                 (void);
+static bool          xmce_set_dimmed_brightness_dynamic                (const char *args);
+static void          xmce_get_dimmed_brightness_dynamic                (void);
+static bool          xmce_set_compositor_dimming_hi                    (const char *args);
+static bool          xmce_set_compositor_dimming_lo                    (const char *args);
+static void          xmce_get_compositor_dimming                       (void);
+static bool          xmce_set_cabc_mode                                (const char *args);
+static void          xmce_get_cabc_mode                                (void);
+static bool          xmce_reset_settings                               (const char *args);
+static bool          xmce_set_dim_timeout                              (const char *args);
+static void          xmce_get_dim_timeout                              (void);
+static bool          xmce_set_dim_with_kbd_timeout                     (const char *args);
+static void          xmce_get_dim_with_kbd_timeout                     (void);
+static bool          xmce_set_dim_timeouts                             (const char *args);
+static void          xmce_get_dim_timeouts                             (void);
+static bool          xmce_set_adaptive_dimming_mode                    (const char *args);
+static void          xmce_get_adaptive_dimming_mode                    (void);
+static bool          xmce_set_adaptive_dimming_time                    (const char *args);
+static void          xmce_get_adaptive_dimming_time                    (void);
+static bool          xmce_set_exception_length_call_in                 (const char *args);
+static bool          xmce_set_exception_length_call_out                (const char *args);
+static bool          xmce_set_exception_length_alarm                   (const char *args);
+static bool          xmce_set_exception_length_usb_connect             (const char *args);
+static bool          xmce_set_exception_length_usb_dialog              (const char *args);
+static bool          xmce_set_exception_length_charger                 (const char *args);
+static bool          xmce_set_exception_length_battery                 (const char *args);
+static bool          xmce_set_exception_length_jack_in                 (const char *args);
+static bool          xmce_set_exception_length_jack_out                (const char *args);
+static bool          xmce_set_exception_length_camera                  (const char *args);
+static bool          xmce_set_exception_length_volume                  (const char *args);
+static bool          xmce_set_exception_length_activity                (const char *args);
+static void          xmce_get_exception_length                         (const char *tag, const char *key);
+static void          xmce_get_exception_lengths                        (void);
+static bool          xmce_set_filter_lid_with_als                      (const char *args);
+static void          xmce_get_filter_lid_with_als                      (void);
+static bool          xmce_set_filter_lid_als_limit                     (const char *args);
+static void          xmce_get_filter_lid_als_limit                     (void);
+static bool          xmce_set_lid_sensor_mode                          (const char *args);
+static void          xmce_get_lid_sensor_mode                          (void);
+static bool          xmce_set_lid_open_actions                         (const char *args);
+static void          xmce_get_lid_open_actions                         (void);
+static bool          xmce_set_lid_close_actions                        (const char *args);
+static void          xmce_get_lid_close_actions                        (void);
+static bool          xmce_set_kbd_slide_open_trigger                   (const char *args);
+static void          xmce_get_kbd_slide_open_trigger                   (void);
+static bool          xmce_set_kbd_slide_open_actions                   (const char *args);
+static void          xmce_get_kbd_slide_open_actions                   (void);
+static bool          xmce_set_kbd_slide_close_trigger                  (const char *args);
+static void          xmce_get_kbd_slide_close_trigger                  (void);
+static bool          xmce_set_kbd_slide_close_actions                  (const char *args);
+static void          xmce_get_kbd_slide_close_actions                  (void);
+static bool          xmce_set_orientation_sensor_mode                  (const char *args);
+static void          xmce_get_orientation_sensor_mode                  (void);
+static bool          xmce_set_orientation_change_is_activity           (const char *args);
+static void          xmce_get_orientation_change_is_activity           (void);
+static bool          xmce_set_flipover_gesture_detection               (const char *args);
+static void          xmce_get_flipover_gesture_detection               (void);
+static bool          xmce_set_ps_mode                                  (const char *args);
+static void          xmce_get_ps_mode                                  (void);
+static bool          xmce_set_ps_on_demand                             (const char *args);
+static void          xmce_get_ps_on_demand                             (void);
+static bool          xmce_set_ps_blocks_touch                          (const char *args);
+static void          xmce_get_ps_blocks_touch                          (void);
+static bool          xmce_set_ps_acts_as_lid                           (const char *args);
+static void          xmce_get_ps_acts_as_lid                           (void);
+static bool          xmce_set_ps_uncover_delay_sub                     (const char *key, const char *args);
+static void          xmce_get_ps_uncover_delay_sub                     (const char *tag, const char *key);
+static bool          xmce_set_default_ps_uncover_delay                 (const char *args);
+static bool          xmce_set_incall_ps_uncover_delay                  (const char *args);
+static void          xmce_get_ps_uncover_delay                         (void);
+static bool          xmce_set_inactivity_shutdown_delay                (const char *args);
+static void          xmce_get_inactivity_shutdown_delay                (void);
+static bool          xmce_set_als_autobrightness                       (const char *args);
+static void          xmce_get_als_autobrightness                       (void);
+static bool          xmce_set_als_mode                                 (const char *args);
+static void          xmce_get_als_mode                                 (void);
+static bool          xmce_is_als_filter_name                           (const char *name);
+static bool          xmce_set_als_input_filter                         (const char *args);
+static void          xmce_get_als_input_filter                         (void);
+static bool          xmce_set_als_sample_time                          (const char *args);
+static void          xmce_get_als_sample_time                          (void);
+static bool          xmce_set_autolock_mode                            (const char *args);
+static void          xmce_get_autolock_mode                            (void);
+static bool          xmce_set_autolock_delay                           (const char *args);
+static void          xmce_get_autolock_delay                           (void);
+static bool          xmce_set_devicelock_in_lockscreen                 (const char *args);
+static void          xmce_get_devicelock_in_lockscreen                 (void);
+static bool          xmce_set_lockscreen_unblank_animation             (const char *args);
+static void          xmce_get_lockscreen_unblank_animation             (void);
+static bool          xmce_set_blank_timeout                            (const char *args);
+static bool          xmce_set_blank_from_lockscreen_timeout            (const char *args);
+static bool          xmce_set_blank_from_lpm_on_timeout                (const char *args);
+static bool          xmce_set_blank_from_lpm_off_timeout               (const char *args);
+static void          xmce_get_blank_timeout_sub                        (const char *tag, const char *key);
+static void          xmce_get_blank_timeout                            (void);
+static bool          xmce_powerkey_event                               (const char *args);
+static bool          xmce_set_powerkey_action                          (const char *args);
+static void          xmce_get_powerkey_action                          (void);
+static bool          xmce_set_powerkey_blanking                        (const char *args);
+static void          xmce_get_powerkey_blanking                        (void);
+static bool          xmce_set_powerkey_long_press_delay                (const char *args);
+static void          xmce_get_powerkey_long_press_delay                (void);
+static bool          xmce_set_powerkey_double_press_delay              (const char *args);
+static void          xmce_get_powerkey_double_press_delay              (void);
+static bool          xmce_is_powerkey_action                           (const char *name);
+static bool          xmce_is_powerkey_action_mask                      (const char *names);
+static void          xmce_set_powerkey_action_mask                     (const char *key, const char *names);
+static bool          xmce_set_powerkey_actions_while_display_off_single(const char *args);
+static bool          xmce_set_powerkey_actions_while_display_off_double(const char *args);
+static bool          xmce_set_powerkey_actions_while_display_off_long  (const char *args);
+static bool          xmce_set_powerkey_actions_while_display_on_single (const char *args);
+static bool          xmce_set_powerkey_actions_while_display_on_double (const char *args);
+static bool          xmce_set_powerkey_actions_while_display_on_long   (const char *args);
+static bool          xmce_set_touchscreen_gesture_action               (const char *args);
+static void          xmce_get_powerkey_action_mask                     (const char *key, const char *tag);
+static void          xmce_get_powerkey_action_masks                    (void);
+static bool          xmce_is_powerkey_dbus_action                      (const char *conf);
+static bool          xmce_set_powerkey_dbus_action                     (const char *args);
+static void          xmce_get_powerkey_dbus_action                     (size_t action_id);
+static void          xmce_get_powerkey_dbus_actions                    (void);
+static bool          xmce_set_ps_override_count                        (const char *args);
+static void          xmce_get_ps_override_count                        (void);
+static bool          xmce_set_ps_override_timeout                      (const char *args);
+static void          xmce_get_ps_override_timeout                      (void);
+static bool          xmce_set_display_off_override                     (const char *args);
+static void          xmce_get_display_off_override                     (void);
+static bool          xmce_set_volkey_policy                            (const char *args);
+static void          xmce_get_volkey_policy                            (void);
+static bool          xmce_set_doubletap_mode                           (const char *args);
+static bool          xmce_set_doubletap_wakeup                         (const char *args);
+static void          xmce_get_doubletap_wakeup                         (void);
+static bool          xmce_set_fingerprint_wakeup_mode                  (const char *args);
+static void          xmce_get_fingerprint_wakeup_mode                  (void);
+static bool          xmce_set_fingerprint_wakeup_allow_delay           (const char *args);
+static void          xmce_get_fingerprint_wakeup_allow_delay           (void);
+static bool          xmce_set_fingerprint_wakeup_trigger_delay         (const char *args);
+static void          xmce_get_fingerprint_wakeup_trigger_delay         (void);
+static bool          xmce_set_fingerprint_wakeup_throttle_delay        (const char *args);
+static void          xmce_get_fingerprint_wakeup_throttle_delay        (void);
+static bool          xmce_set_power_saving_mode                        (const char *args);
+static void          xmce_get_power_saving_mode                        (void);
+static bool          xmce_set_psm_threshold                            (const char *args);
+static void          xmce_get_psm_threshold                            (void);
+static bool          xmce_set_forced_psm                               (const char *args);
+static void          xmce_get_forced_psm                               (void);
+static bool          xmce_set_low_power_mode                           (const char *args);
+static void          xmce_get_low_power_mode                           (void);
+static bool          xmce_set_inhibit_mode                             (const char *args);
+static void          xmce_get_inhibit_mode                             (void);
+static bool          xmce_set_kbd_slide_inhibit_mode                   (const char *args);
+static void          xmce_get_kbd_slide_inhibit_mode                   (void);
+static bool          xmce_set_lipstick_core_delay                      (const char *args);
+static void          xmce_get_lipstick_core_delay                      (void);
+static bool          xmce_set_brightness_fade_default                  (const char *args);
+static bool          xmce_set_brightness_fade_dimming                  (const char *args);
+static bool          xmce_set_brightness_fade_als                      (const char *args);
+static bool          xmce_set_brightness_fade_blank                    (const char *args);
+static bool          xmce_set_brightness_fade_unblank                  (const char *args);
+static void          xmce_get_brightness_fade_helper                   (const char *title, const char *key);
+static void          xmce_get_brightness_fade                          (void);
+static bool          xmce_set_memnotify_warning_used                   (const char *args);
+static bool          xmce_set_memnotify_warning_active                 (const char *args);
+static bool          xmce_set_memnotify_critical_used                  (const char *args);
+static bool          xmce_set_memnotify_critical_active                (const char *args);
+static void          xmce_get_memnotify_helper                         (const char *title, const char *key);
+static void          xmce_get_memnotify_limits                         (void);
+static void          xmce_get_memnotify_level                          (void);
+static bool          xmce_set_input_policy_mode                        (const char *args);
+static void          xmce_get_input_policy_mode                        (void);
+static bool          xmce_set_touch_unblock_delay                      (const char *args);
+static void          xmce_get_touch_unblock_delay                      (void);
+static bool          xmce_set_cpu_scaling_governor                     (const char *args);
+static void          xmce_get_cpu_scaling_governor                     (void);
+static bool          xmce_set_never_blank                              (const char *args);
+static void          xmce_get_never_blank                              (void);
+static bool          xmce_set_suspend_policy                           (const char *args);
+static void          xmce_get_suspend_policy                           (void);
+static bool          xmce_get_suspend_stats                            (const char *args);
+static bool          xmce_get_display_stats                            (const char *args);
+static bool          xmce_set_fake_doubletap                           (const char *args);
+static void          xmce_get_fake_doubletap                           (void);
+static bool          xmce_tklock_open                                  (const char *args);
+static bool          xmce_tklock_close                                 (const char *args);
+static bool          xmce_tklock_callback                              (const char *args);
+static bool          xmce_set_tklock_mode                              (const char *args);
+static void          xmce_get_tklock_mode                              (void);
+static bool          xmce_set_tklock_blank                             (const char *args);
+static void          xmce_get_tklock_blank                             (void);
+static void          xmce_get_version                                  (void);
+static void          xmce_get_inactivity_state                         (void);
+static void          xmce_get_keyboard_backlight_state                 (void);
+static bool          xmce_get_status                                   (const char *args);
+static bool          xmce_set_demo_mode                                (const char *args);
+
+/* ------------------------------------------------------------------------- *
+ * DBUSHELPER
+ * ------------------------------------------------------------------------- */
+
+static const char   *dbushelper_get_type_name      (int type);
+static gboolean      dbushelper_require_type       (DBusMessageIter *iter, int want_type);
+static gboolean      dbushelper_require_array_type (DBusMessageIter *iter, int want_type);
+static DBusMessage  *dbushelper_call_method        (DBusMessage *req);
+static gboolean      dbushelper_read_at_end        (DBusMessageIter *iter);
+static gboolean      dbushelper_read_int           (DBusMessageIter *iter, gint *value);
+static gboolean      dbushelper_read_int64         (DBusMessageIter *iter, int64_t *value);
+static gboolean      dbushelper_read_string        (DBusMessageIter *iter, gchar **value);
+static gboolean      dbushelper_read_boolean       (DBusMessageIter *iter, gboolean *value);
+static gboolean      dbushelper_read_variant       (DBusMessageIter *iter, DBusMessageIter *sub);
+static gboolean      dbushelper_read_array         (DBusMessageIter *iter, DBusMessageIter *sub);
+static gboolean      dbushelper_read_dict          (DBusMessageIter *iter, DBusMessageIter *sub);
+static gboolean      dbushelper_read_struct        (DBusMessageIter *iter, DBusMessageIter *sub);
+static gboolean      dbushelper_read_int_array     (DBusMessageIter *iter, gint **value, gint *count);
+static gboolean      dbushelper_init_read_iterator (DBusMessage *rsp, DBusMessageIter *iter);
+static gboolean      dbushelper_init_write_iterator(DBusMessage *req, DBusMessageIter *iter);
+static gboolean      dbushelper_write_int          (DBusMessageIter *iter, gint value);
+static gboolean      dbushelper_write_string       (DBusMessageIter *iter, const char *value);
+static gboolean      dbushelper_write_int_array    (DBusMessageIter *iter, const gint *value, gint count);
+static gboolean      dbushelper_write_boolean      (DBusMessageIter *iter, gboolean value);
+static gboolean      dbushelper_write_path         (DBusMessageIter *iter, const gchar *value);
+static gboolean      dbushelper_push_variant       (DBusMessageIter **stack, const char *signature);
+static gboolean      dbushelper_push_array         (DBusMessageIter **stack, const char *signature);
+static gboolean      dbushelper_pop_container      (DBusMessageIter **stack);
+static void          dbushelper_abandon_stack      (DBusMessageIter *stack, DBusMessageIter *iter);
+
+/* ------------------------------------------------------------------------- *
+ * UNGROUPED
+ * ------------------------------------------------------------------------- */
+
+static int          lookup                   (const symbol_t *stab, const char *key);
+static const char  *rlookup                  (const symbol_t *stab, int val);
+static int          parse_inhibitmode        (const char *args);
+static const char  *repr_inhibitmode         (int value);
+static gint        *parse_gint_array         (const char *text, gint *len);
+static bool         is_configurable_pattern  (const char *pattern);
+static bool         set_led_breathing_enabled(const char *args);
+static void         get_led_breathing_enabled(void);
+static bool         set_led_breathing_limit  (const char *args);
+static void         get_led_breathing_limit  (void);
+static bool         set_led_pattern_enabled  (const char *pattern, bool enable);
+static bool         interactive_confirmation (const char *positive);
+static char        *elapsed_time_repr        (char *buff, size_t size, int64_t t);
+int                 main                     (int argc, char **argv);
+
+/* ------------------------------------------------------------------------- *
+ * MCETOOL
+ * ------------------------------------------------------------------------- */
+
+static gboolean   mcetool_parse_timspec    (struct timespec *ts, const char *args);
+static char      *mcetool_parse_token      (char **ppos);
+static char      *mcetool_format_bitmask   (const symbol_t *lut, int mask, char *buff, size_t size);
+static unsigned   mcetool_parse_bitmask    (const symbol_t *lut, const char *args);
+static bool       mcetool_show_led_patterns(const char *args);
+static bool       mcetool_block            (const char *args);
+
+/* ------------------------------------------------------------------------- *
+ * MCETOOL_DO
+ * ------------------------------------------------------------------------- */
+
+static bool  mcetool_do_enable_led         (const char *arg);
+static bool  mcetool_do_disable_led        (const char *arg);
+static bool  mcetool_do_enable_pattern     (const char *args);
+static bool  mcetool_do_disable_led_pattern(const char *args);
+static bool  mcetool_do_activate_pattern   (const char *args);
+static bool  mcetool_do_deactivate_pattern (const char *args);
+#ifdef ENABLE_BATTERY_SIMULATION
+static bool  mcetool_do_set_charger_type(const char *arg);
+static bool  mcetool_do_set_charger_state  (const char *arg);
+static bool  mcetool_do_set_battery_level  (const char *arg);
+#endif
+static bool  mcetool_do_unblank_screen     (const char *arg);
+static bool  mcetool_do_dim_screen         (const char *arg);
+static bool  mcetool_do_blank_screen       (const char *arg);
+static bool  mcetool_do_blank_screen_lpm   (const char *arg);
+static bool  mcetool_do_version            (const char *arg);
+static bool  mcetool_do_help               (const char *arg);
+static bool  mcetool_do_long_help          (const char *arg);
 
 /* ------------------------------------------------------------------------- *
  * GENERIC DBUS HELPERS
@@ -224,6 +612,35 @@ static gboolean xmce_ipc_va(const gchar *const name, DBusMessage **reply,
                              name, reply,
                              arg_type, va);
 }
+
+/** Wrapper for making synchronous D-Bus method calls to MCE
+ *
+ * If reply pointer is NULL, the method call is sent without
+ * waiting for method return message.
+ *
+ * @param name      [IN]  D-Bus method call name
+ * @param reply     [OUT] Where to store method_return message, or NULL
+ * @param arg_type  [IN]  DBUS_TYPE_STRING etc, as with dbus_message_append_args()
+ * @param ...       [IN]  D-Bus arguments, terminated with DBUS_TYPE_INVALID
+ *
+ * @return TRUE if call was successfully sent (and optionally reply received),
+ *         or FALSE in case of errors
+ */
+#ifdef ENABLE_BATTERY_SIMULATION
+static gboolean xmce_ipc(const gchar *const name, DBusMessage **reply,
+                         int arg_type, ...)
+{
+        va_list va;
+        va_start(va, arg_type);
+        gboolean ack = xdbus_call_va(MCE_SERVICE,
+                                     MCE_REQUEST_PATH,
+                                     MCE_REQUEST_IF,
+                                     name, reply,
+                                     arg_type, va);
+        va_end(va);
+        return ack;
+}
+#endif // ENABLE_BATTERY_SIMULATION
 
 /** Wrapper for making MCE D-Bus method calls without waiting for reply
  *
@@ -1400,16 +1817,6 @@ EXIT:
  * SYMBOL LOOKUP TABLES
  * ------------------------------------------------------------------------- */
 
-/** Simple string key to integer value symbol */
-typedef struct
-{
-        /** Name of the symbol, or NULL to mark end of symbol table */
-        const char *key;
-
-        /** Value of the symbol */
-        int         val;
-} symbol_t;
-
 /** Lookup symbol by name and return value
  *
  * @param stab array of symbol_t objects
@@ -1439,6 +1846,14 @@ static const char *rlookup(const symbol_t *stab, int val)
                         return stab->key;
         }
 }
+
+/** Lookup table for gesture events
+ */
+static const symbol_t gesture_values[] = {
+        { "doubletap",  GESTURE_DOUBLETAP },
+        { "fpwakeup",   GESTURE_FPWAKEUP  },
+        { NULL, -1 }
+};
 
 /** Lookup table for autosuspend policies
  *
@@ -1474,6 +1889,15 @@ static const symbol_t never_blank_values[] = {
 static const symbol_t button_backlight_values[] = {
         { "enabled",   1 },
         { "disabled",  0 },
+        { NULL, -1 }
+};
+
+/** Lookup table for button backlight mode options
+ */
+static const symbol_t button_backlight_mode_values[] = {
+        { "off",    MCE_BUTTON_BACKLIGHT_MODE_OFF    },
+        { "on",     MCE_BUTTON_BACKLIGHT_MODE_ON     },
+        { "policy", MCE_BUTTON_BACKLIGHT_MODE_POLICY },
         { NULL, -1 }
 };
 
@@ -1890,6 +2314,11 @@ static const char * const led_patterns[] =
         MCE_LED_PATTERN_KILLING_LIPSTICK,
         MCE_LED_PATTERN_TOUCH_INPUT_BLOCKED,
         MCE_LED_PATTERN_DISPLAY_DIMMED,
+        MCE_LED_PATTERN_SCANNING_FINGERPRINT,
+        MCE_LED_PATTERN_FINGERPRINT_ACQUIRED,
+        MCE_LED_PATTERN_PROXIMITY_COVERED,
+        MCE_LED_PATTERN_PROXIMITY_UNCOVERING,
+        MCE_LED_PATTERN_PROXIMITY_UNCOVERED,
         0
 };
 
@@ -2160,6 +2589,198 @@ static void xmce_get_color_profile(void)
         xmce_ipc_string_reply(MCE_COLOR_PROFILE_GET, &str, DBUS_TYPE_INVALID);
         printf("%-"PAD1"s %s\n","Color profile:", str ?: "unknown");
         free(str);
+}
+
+/* ------------------------------------------------------------------------- *
+ * battery stuff
+ * ------------------------------------------------------------------------- */
+
+#ifdef ENABLE_BATTERY_SIMULATION
+static bool xmce_set_charger_type(const char *type)
+{
+        dbus_bool_t   ret = false;
+        DBusError     err = DBUS_ERROR_INIT;
+        DBusMessage  *rsp = 0;
+        gboolean      ack = xmce_ipc(MCE_CHARGER_TYPE_REQ, &rsp,
+                                     DBUS_TYPE_STRING, &type,
+                                     DBUS_TYPE_INVALID);
+        if( !ack || !rsp )
+                goto EXIT;
+
+        if( !dbus_message_get_args(rsp, &err,
+                                   DBUS_TYPE_BOOLEAN, &ret,
+                                   DBUS_TYPE_INVALID) )
+                goto EXIT;
+
+EXIT:
+        if( dbus_error_is_set(&err) ) {
+                errorf("set %s: %s: %s\n", type, err.name, err.message);
+                dbus_error_free(&err);
+        }
+
+        if( rsp ) dbus_message_unref(rsp);
+
+        return ack && ret;
+}
+
+static bool xmce_set_charger_state(const char *state)
+{
+        dbus_bool_t   ret = false;
+        DBusError     err = DBUS_ERROR_INIT;
+        DBusMessage  *rsp = 0;
+        gboolean      ack = xmce_ipc(MCE_CHARGER_STATE_REQ, &rsp,
+                                     DBUS_TYPE_STRING, &state,
+                                     DBUS_TYPE_INVALID);
+        if( !ack || !rsp )
+                goto EXIT;
+
+        if( !dbus_message_get_args(rsp, &err,
+                                   DBUS_TYPE_BOOLEAN, &ret,
+                                   DBUS_TYPE_INVALID) )
+                goto EXIT;
+
+EXIT:
+        if( dbus_error_is_set(&err) ) {
+                errorf("set %s: %s: %s\n", state, err.name, err.message);
+                dbus_error_free(&err);
+        }
+
+        if( rsp ) dbus_message_unref(rsp);
+
+        return ack && ret;
+}
+
+static bool xmce_set_battery_level(int level)
+{
+        dbus_bool_t   ret = false;
+        DBusError     err = DBUS_ERROR_INIT;
+        DBusMessage  *rsp = 0;
+        dbus_int32_t  arg = level;
+        gboolean      ack = xmce_ipc(MCE_BATTERY_LEVEL_REQ, &rsp,
+                                     DBUS_TYPE_INT32, &arg,
+                                     DBUS_TYPE_INVALID);
+        if( !ack || !rsp )
+                goto EXIT;
+
+        if( !dbus_message_get_args(rsp, &err,
+                                   DBUS_TYPE_BOOLEAN, &ret,
+                                   DBUS_TYPE_INVALID) )
+                goto EXIT;
+
+EXIT:
+        if( dbus_error_is_set(&err) ) {
+                errorf("set %d: %s: %s\n", level, err.name, err.message);
+                dbus_error_free(&err);
+        }
+
+        if( rsp ) dbus_message_unref(rsp);
+
+        return ack && ret;
+}
+
+static bool mcetool_do_set_charger_type(const char *arg)
+{
+        const char * const lut[] = {
+                MCE_CHARGER_TYPE_NONE,
+                MCE_CHARGER_TYPE_USB,
+                MCE_CHARGER_TYPE_DCP,
+                MCE_CHARGER_TYPE_HVDCP,
+                MCE_CHARGER_TYPE_CDP,
+                MCE_CHARGER_TYPE_WIRELESS,
+                MCE_CHARGER_TYPE_OTHER,
+                0
+        };
+
+        for( size_t i = 0; ; ++i ) {
+                if( !lut[i] ) {
+                        errorf("%s: invalid charger type\n", arg);
+                        return false;
+                }
+                if( !strcmp(lut[i], arg) )
+                        break;
+        }
+
+        return xmce_set_charger_type(arg);
+}
+
+static bool mcetool_do_set_charger_state(const char *arg)
+{
+        const char * const lut[] = {
+                MCE_CHARGER_STATE_UNKNOWN,
+                MCE_CHARGER_STATE_ON,
+                MCE_CHARGER_STATE_OFF,
+                0
+        };
+
+        for( size_t i = 0; ; ++i ) {
+                if( !lut[i] ) {
+                        errorf("%s: invalid charger state\n", arg);
+                        return false;
+                }
+                if( !strcmp(lut[i], arg) )
+                        break;
+        }
+
+        return xmce_set_charger_state(arg);
+}
+
+static bool mcetool_do_set_battery_level(const char *arg)
+{
+        int level = xmce_parse_integer(arg);
+        if( level < -1 || level > 100 ) {
+                errorf("%s: invalid battery level\n", arg);
+                return false;
+        }
+        return xmce_set_battery_level(level);
+}
+#endif // ENABLE_BATTERY_SIMULATION
+
+static void xmce_get_cable_state(void)
+{
+        char *str = 0;
+        xmce_ipc_string_reply(MCE_USB_CABLE_STATE_GET, &str, DBUS_TYPE_INVALID);
+        printf("%-"PAD1"s %s\n","Charger cable:", str ?: "unknown");
+        free(str);
+}
+
+static void xmce_get_charger_state(void)
+{
+        char *str = 0;
+        xmce_ipc_string_reply(MCE_CHARGER_STATE_GET, &str, DBUS_TYPE_INVALID);
+        printf("%-"PAD1"s %s\n","Charger state:", str ?: "unknown");
+        free(str);
+}
+
+static void xmce_get_battery_status(void)
+{
+        char *str = 0;
+        xmce_ipc_string_reply(MCE_BATTERY_STATUS_GET, &str, DBUS_TYPE_INVALID);
+        printf("%-"PAD1"s %s\n","Battery status:", str ?: "unknown");
+        free(str);
+}
+
+static void xmce_get_battery_state(void)
+{
+        char *str = 0;
+        xmce_ipc_string_reply(MCE_BATTERY_STATE_GET, &str, DBUS_TYPE_INVALID);
+        printf("%-"PAD1"s %s\n","Battery state:", str ?: "unknown");
+        free(str);
+}
+
+static void xmce_get_battery_level(void)
+{
+        gint num = -1;
+        xmce_ipc_int_reply(MCE_BATTERY_LEVEL_GET, &num, DBUS_TYPE_INVALID);
+        printf("%-"PAD1"s %d\n","Battery level:", num);
+}
+
+static void xmce_get_battery_info(void)
+{
+        xmce_get_cable_state();
+        xmce_get_charger_state();
+        xmce_get_battery_level();
+        xmce_get_battery_status();
+        xmce_get_battery_state();
 }
 
 /* ------------------------------------------------------------------------- *
@@ -2459,6 +3080,60 @@ EXIT:
 /* ------------------------------------------------------------------------- *
  * button backlight
  * ------------------------------------------------------------------------- */
+
+/** Set button backlight off delay
+ *
+ * @param args string that can be parsed to number
+ */
+static bool xmce_set_button_backlligut_off_delay(const char *args)
+{
+        const char *key = MCE_SETTING_BUTTONBACKLIGHT_OFF_DELAY;
+        gint        val = xmce_parse_integer(args);
+        xmce_setting_set_int(key, val);
+        return true;
+}
+
+/** Get current fingerprint wakeup allow delay
+ */
+static void xmce_get_button_backlligut_off_delay(void)
+{
+        const char *tag = "Button backlight off delay:";
+        const char *key = MCE_SETTING_BUTTONBACKLIGHT_OFF_DELAY;
+        gint        val = 0;
+        char        txt[64];
+
+        if( !xmce_setting_get_int(key, &val) )
+                snprintf(txt, sizeof txt, "unknown");
+        else
+                snprintf(txt, sizeof txt, "%d [ms]", val);
+
+        printf("%-"PAD1"s %s\n", tag, txt);
+}
+
+/** Set button backlight mode
+ *
+ * Note: The set mode gets cancelled when mcetool exits. The
+ *       --block option can be used keep mcetool connected to
+ *       system bus.
+ *
+ * @param args string with "off", "on", "policy"
+ */
+static bool xmce_set_button_backlight_mode(const char *args)
+{
+        debugf("%s(%s)\n", __FUNCTION__, args);
+
+        dbus_int32_t val = lookup(button_backlight_mode_values, args);
+        if( val < 0 ) {
+                errorf("%s: invalid button backlight value\n", args);
+                return false;
+        }
+
+        xmce_ipc_no_reply(MCE_BUTTON_BACKLIGHT_MODE_REQ,
+                          DBUS_TYPE_INT32, &val,
+                          DBUS_TYPE_INVALID);
+
+        return true;
+}
 
 /** Set button backlight state
  *
@@ -3513,6 +4188,30 @@ static void xmce_get_ps_mode(void)
         printf("%-"PAD1"s %s\n", "Use ps mode:", txt);
 }
 
+/* Set ps use mode
+ *
+ * @param args string suitable for interpreting as enabled/disabled
+ */
+static bool xmce_set_ps_on_demand(const char *args)
+{
+        debugf("%s(%s)\n", __FUNCTION__, args);
+        gboolean val = xmce_parse_enabled(args);
+        xmce_setting_set_bool(MCE_SETTING_PROXIMITY_ON_DEMAND, val);
+        return true;
+}
+
+/** Get current ps mode from mce and print it out
+ */
+static void xmce_get_ps_on_demand(void)
+{
+        gboolean val = 0;
+        char txt[32] = "unknown";
+
+        if( xmce_setting_get_bool(MCE_SETTING_PROXIMITY_ON_DEMAND, &val) )
+                snprintf(txt, sizeof txt, "%s", val ? "enabled" : "disabled");
+        printf("%-"PAD1"s %s\n", "Use ps on-demand:", txt);
+}
+
 /** Set ps can block touch input mode
  *
  * @param args string suitable for interpreting as enabled/disabled
@@ -3557,6 +4256,102 @@ static void xmce_get_ps_acts_as_lid(void)
         if( xmce_setting_get_bool(MCE_SETTING_PROXIMITY_PS_ACTS_AS_LID, &val) )
                 snprintf(txt, sizeof txt, "%s", val ? "enabled" : "disabled");
         printf("%-"PAD1"s %s\n", "PS acts as LID sensor:", txt);
+}
+
+/* ------------------------------------------------------------------------- *
+ * ps uncover delay
+ * ------------------------------------------------------------------------- */
+
+static bool xmce_set_ps_uncover_delay_sub(const char *key, const char *args)
+{
+        int val = xmce_parse_integer(args);
+        if( val < MCE_MINIMUM_TK_PROXIMITY_DELAY ||
+            val > MCE_MAXIMUM_TK_PROXIMITY_DELAY ) {
+                errorf("%s: invalid proximity uncover delay\n", args);
+                return false;
+        }
+        return xmce_setting_set_int(key, val);
+}
+
+static void xmce_get_ps_uncover_delay_sub(const char *tag, const char *key)
+{
+        gint val = 0;
+        char txt[32];
+
+        strcpy(txt, "unknown");
+        if( xmce_setting_get_int(key, &val) )
+                snprintf(txt, sizeof txt, "%d", (int)val);
+        printf("%-"PAD1"s %s (ms)\n", tag, txt);
+}
+
+/** Set default proximity sensor uncover delay
+ *
+ * @param args string that can be parsed to integer
+ */
+static bool xmce_set_default_ps_uncover_delay(const char *args)
+{
+        return xmce_set_ps_uncover_delay_sub(MCE_SETTING_TK_PROXIMITY_DELAY_DEFAULT,
+                                             args);
+}
+
+/** Set default proximity sensor uncover delay
+ *
+ * @param args string that can be parsed to integer
+ */
+static bool xmce_set_incall_ps_uncover_delay(const char *args)
+{
+        return xmce_set_ps_uncover_delay_sub(MCE_SETTING_TK_PROXIMITY_DELAY_INCALL,
+                                             args);
+}
+
+/** Get proximity sensor uncover delays and print them out
+ */
+static void xmce_get_ps_uncover_delay(void)
+{
+        xmce_get_ps_uncover_delay_sub("Default ps uncover delay:",
+                                      MCE_SETTING_TK_PROXIMITY_DELAY_DEFAULT);
+
+        xmce_get_ps_uncover_delay_sub("In-call ps uncover delay:",
+                                      MCE_SETTING_TK_PROXIMITY_DELAY_INCALL);
+}
+
+/* ------------------------------------------------------------------------- *
+ * inactivity shutdown delay
+ * ------------------------------------------------------------------------- */
+
+/** Set inactivity shutdown delay
+ *
+ * @param args string that can be parsed to integer
+ */
+static bool xmce_set_inactivity_shutdown_delay(const char *args)
+{
+        const char *key = MCE_SETTING_INACTIVITY_SHUTDOWN_DELAY;
+        int val = xmce_parse_integer(args);
+
+        if( val != 0 && val < MCE_MINIMUM_INACTIVITY_SHUTDOWN_DELAY ) {
+                errorf("%s: invalid inactivity shutdown delay\n", args);
+                return false;
+        }
+
+        return xmce_setting_set_int(key, val);
+}
+
+/** Get inactivity shutdown delay and print it out
+ */
+static void xmce_get_inactivity_shutdown_delay(void)
+{
+        const char *key = MCE_SETTING_INACTIVITY_SHUTDOWN_DELAY;
+        gint val = 0;
+        char txt[32];
+
+        if( !xmce_setting_get_int(key, &val) )
+                strcpy(txt, "unknown");
+        else if( val < MCE_MINIMUM_INACTIVITY_SHUTDOWN_DELAY )
+                strcpy(txt, "disabled");
+        else
+                snprintf(txt, sizeof txt, "%d (s)", (int)val);
+
+        printf("%-"PAD1"s %s\n", "Inactivity shutdown delay:", txt);
 }
 
 /* ------------------------------------------------------------------------- *
@@ -4075,6 +4870,7 @@ static bool xmce_is_powerkey_action(const char *name)
                 "vibrate",
                 "unblank",
                 "tkunlock",
+                "tkunlock2",
                 "dbus1",
                 "dbus2",
                 "dbus3",
@@ -4085,6 +4881,7 @@ static bool xmce_is_powerkey_action(const char *name)
                 "dbus8",
                 "dbus9",
                 "dbus10",
+                "nop",
         };
 
         for( size_t i = 0; i < G_N_ELEMENTS(lut); ++i ) {
@@ -4182,7 +4979,7 @@ static bool xmce_set_powerkey_actions_while_display_on_long(const char *args)
         return true;
 }
 
-static const char * const gesture_actions_key[] =
+static const char * const gesture_actions_key[POWERKEY_ACTIONS_GESTURE_COUNT] =
 {
         MCE_SETTING_POWERKEY_ACTIONS_GESTURE0,
         MCE_SETTING_POWERKEY_ACTIONS_GESTURE1,
@@ -4195,6 +4992,15 @@ static const char * const gesture_actions_key[] =
         MCE_SETTING_POWERKEY_ACTIONS_GESTURE8,
         MCE_SETTING_POWERKEY_ACTIONS_GESTURE9,
         MCE_SETTING_POWERKEY_ACTIONS_GESTURE10,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE11,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE12,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE13,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE14,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE15,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE16,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE17,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE18,
+        MCE_SETTING_POWERKEY_ACTIONS_GESTURE19,
 };
 
 /** Set actions to perform on touchscreen gestures
@@ -4203,10 +5009,13 @@ static bool xmce_set_touchscreen_gesture_action(const char *args)
 {
         char *work = strdup(args);
         char *conf = work;
+        char *gesture = mcetool_parse_token(&conf);
 
-        size_t id = xmce_parse_integer(mcetool_parse_token(&conf));
+        int id = lookup(gesture_values, gesture);
+        if( id < 0 )
+                id = xmce_parse_integer(gesture);
 
-        if( id >= G_N_ELEMENTS(gesture_actions_key) ) {
+        if( id < 0 || id >= (int)G_N_ELEMENTS(gesture_actions_key) ) {
                 fprintf(stderr, "invalid gesture id: '%s'\n", work);
                 return false;
         }
@@ -4251,8 +5060,12 @@ static void xmce_get_powerkey_action_masks(void)
         printf("Touchscreen gestures:\n");
         for( size_t id = 0; id < G_N_ELEMENTS(gesture_actions_key); ++id) {
                 char temp[32];
-                snprintf(temp, sizeof temp, "gesture%zu", id);
-                xmce_get_powerkey_action_mask(gesture_actions_key[id], temp);
+                const char *gesture = rlookup(gesture_values, (int)id);
+                if( !gesture ) {
+                        snprintf(temp, sizeof temp, "gesture%zu", id);
+                        gesture = temp;
+                }
+                xmce_get_powerkey_action_mask(gesture_actions_key[id], gesture);
         }
 }
 
@@ -4630,6 +5443,135 @@ static void xmce_get_doubletap_wakeup(void)
 }
 
 /* ------------------------------------------------------------------------- *
+ * fingerprint
+ * ------------------------------------------------------------------------- */
+
+/** Lookup table for fingerprint wakeup policies
+ *
+ * @note These must match the hardcoded values in mce itself.
+ */
+static const symbol_t fingerprint_wakeup[] = {
+        { "never",     FPWAKEUP_ENABLE_NEVER },
+        { "always",    FPWAKEUP_ENABLE_ALWAYS },
+        { "proximity", FPWAKEUP_ENABLE_NO_PROXIMITY },
+        { NULL, -1 }
+};
+
+/** Set fingerprint wakeup mode
+ *
+ * @param args string that can be parsed to fingerprint wakeup mode
+ */
+static bool xmce_set_fingerprint_wakeup_mode(const char *args)
+{
+        int val = lookup(fingerprint_wakeup, args);
+        if( val < 0 ) {
+                errorf("%s: invalid fingerprint policy value\n", args);
+                exit(EXIT_FAILURE);
+        }
+        xmce_setting_set_int(MCE_SETTING_FPWAKEUP_MODE, val);
+        return true;
+}
+
+/** Get current fingerprint wakeup mode from mce and print it out
+ */
+static void xmce_get_fingerprint_wakeup_mode(void)
+{
+        gint        val = 0;
+        const char *txt = 0;
+        if( xmce_setting_get_int(MCE_SETTING_FPWAKEUP_MODE, &val) )
+                txt = rlookup(fingerprint_wakeup, val);
+        printf("%-"PAD1"s %s \n", "Fingerprint wakeup policy:",
+               txt ?: "unknown");
+}
+
+/** Set fingerprint wakeup allow delay
+ *
+ * @param args string that can be parsed to number
+ */
+static bool xmce_set_fingerprint_wakeup_allow_delay(const char *args)
+{
+        const char *key = MCE_SETTING_FPWAKEUP_ALLOW_DELAY;
+        gint        val = xmce_parse_integer(args);
+        xmce_setting_set_int(key, val);
+        return true;
+}
+
+/** Get current fingerprint wakeup allow delay
+ */
+static void xmce_get_fingerprint_wakeup_allow_delay(void)
+{
+        const char *tag = "Fingerprint wakeup allow delay:";
+        const char *key = MCE_SETTING_FPWAKEUP_ALLOW_DELAY;
+        gint        val = 0;
+        char        txt[64];
+
+        if( !xmce_setting_get_int(key, &val) )
+                snprintf(txt, sizeof txt, "unknown");
+        else
+                snprintf(txt, sizeof txt, "%d [ms]", val);
+
+        printf("%-"PAD1"s %s\n", tag, txt);
+}
+
+/** Set fingerprint wakeup triggering delay
+ *
+ * @param args string that can be parsed to number
+ */
+static bool xmce_set_fingerprint_wakeup_trigger_delay(const char *args)
+{
+        const char *key = MCE_SETTING_FPWAKEUP_TRIGGER_DELAY;
+        gint        val = xmce_parse_integer(args);
+        xmce_setting_set_int(key, val);
+        return true;
+}
+
+/** Get current fingerprint wakeup triggering delay
+ */
+static void xmce_get_fingerprint_wakeup_trigger_delay(void)
+{
+        const char *tag = "Fingerprint wakeup triggering delay:";
+        const char *key = MCE_SETTING_FPWAKEUP_TRIGGER_DELAY;
+        gint        val = 0;
+        char        txt[64];
+
+        if( !xmce_setting_get_int(key, &val) )
+                snprintf(txt, sizeof txt, "unknown");
+        else
+                snprintf(txt, sizeof txt, "%d [ms]", val);
+
+        printf("%-"PAD1"s %s\n", tag, txt);
+}
+
+/** Set fingerprint wakeup throttle delay
+ *
+ * @param args string that can be parsed to number
+ */
+static bool xmce_set_fingerprint_wakeup_throttle_delay(const char *args)
+{
+        const char *key = MCE_SETTING_FPWAKEUP_THROTTLE_DELAY;
+        gint        val = xmce_parse_integer(args);
+        xmce_setting_set_int(key, val);
+        return true;
+}
+
+/** Get current fingerprint wakeup throttle delay
+ */
+static void xmce_get_fingerprint_wakeup_throttle_delay(void)
+{
+        const char *tag = "Fingerprint wakeup throttle delay:";
+        const char *key = MCE_SETTING_FPWAKEUP_THROTTLE_DELAY;
+        gint        val = 0;
+        char        txt[64];
+
+        if( !xmce_setting_get_int(key, &val) )
+                snprintf(txt, sizeof txt, "unknown");
+        else
+                snprintf(txt, sizeof txt, "%d [ms]", val);
+
+        printf("%-"PAD1"s %s\n", tag, txt);
+}
+
+/* ------------------------------------------------------------------------- *
  * psm (power saving mode)
  * ------------------------------------------------------------------------- */
 
@@ -4672,7 +5614,7 @@ static bool xmce_set_psm_threshold(const char *args)
         debugf("%s(%s)\n", __FUNCTION__, args);
         int val = xmce_parse_integer(args);
 
-        if( val < 10 || val > 50 || val % 10 ) {
+        if( val < 0 || val > 100 ) {
                 errorf("%d: invalid psm threshold value\n", val);
                 exit(EXIT_FAILURE);
         }
@@ -5149,7 +6091,7 @@ static char *elapsed_time_repr(char *buff, size_t size, int64_t t)
         int m  = (int)t %   60; t /=   60;
         int h  = (int)t %   24; t /=   24;
 
-        if( t )	snprintf(days, sizeof days, "%"PRIi64"d ", t);
+        if( t ) snprintf(days, sizeof days, "%"PRIi64"d ", t);
 
         snprintf(buff, size, "%s%s%02d:%02d:%02d.%03d",
                  sgn, days, h, m, s, ms);
@@ -5533,6 +6475,7 @@ static bool xmce_get_status(const char *args)
         xmce_get_blank_prevent_mode();
         xmce_get_keyboard_backlight_state();
         xmce_get_inactivity_state();
+        xmce_get_inactivity_shutdown_delay();
         xmce_get_power_saving_mode();
         xmce_get_forced_psm();
         xmce_get_psm_threshold();
@@ -5542,6 +6485,10 @@ static bool xmce_get_status(const char *args)
         xmce_get_devicelock_in_lockscreen();
         xmce_get_lockscreen_unblank_animation();
         xmce_get_doubletap_wakeup();
+        xmce_get_fingerprint_wakeup_mode();
+        xmce_get_fingerprint_wakeup_allow_delay();
+        xmce_get_fingerprint_wakeup_trigger_delay();
+        xmce_get_fingerprint_wakeup_throttle_delay();
         xmce_get_volkey_policy();
         xmce_get_powerkey_action();
         xmce_get_powerkey_blanking();
@@ -5563,6 +6510,8 @@ static bool xmce_get_status(const char *args)
         xmce_get_flipover_gesture_detection();
         xmce_get_wrist_gesture_detection();
         xmce_get_ps_mode();
+        xmce_get_ps_on_demand();
+        xmce_get_ps_uncover_delay();
         xmce_get_ps_blocks_touch();
         xmce_get_ps_acts_as_lid();
         xmce_get_lid_sensor_mode();
@@ -5592,6 +6541,9 @@ static bool xmce_get_status(const char *args)
         get_led_breathing_limit();
         xmce_get_memnotify_limits();
         xmce_get_memnotify_level();
+        xmce_get_button_backlligut_off_delay();
+
+        xmce_get_battery_info();
         printf("\n");
 
         return true;
@@ -5977,6 +6929,57 @@ static const mce_opt_t options[] =
                         "Note: proximity setting applies for lid sensor too."
         },
         {
+                .name        = "set-fingerprint-wakeup-mode",
+                .with_arg    = xmce_set_fingerprint_wakeup_mode,
+                .values      = "never|always|proximity",
+                .usage       =
+                        "set the fingerprint wakeup mode; valid modes are:\n"
+                        "'never', 'always', 'proximity'\n"
+                        "\n"
+                        "Note: Additionally the device must be in a state where fingerprint\n"
+                        "      acquisition does not interfere with authentication services\n"
+                        "      and some sensible action can be taken on fingerprint identify.\n"
+        },
+        {
+                .name        = "set-fingerprint-wakeup-allow-delay",
+                .with_arg    = xmce_set_fingerprint_wakeup_allow_delay,
+                .values      = "ms",
+                .usage       =
+                        "set delay for enabling fp wakeups on policy change.\n"
+                        "\n"
+                        "When policy decision makes denied->allowed transition, mce will\n"
+                        "wait a bit before starting identification ipc - so that short\n"
+                        "living policy changes do not cause unnecessary dbus ipc.\n"
+                        "\n"
+                        "On allowed->denied transitions mce will immediately let go of any\n"
+                        "pending identification requests.\n"
+        },
+        {
+                .name        = "set-fingerprint-wakeup-trigger-delay",
+                .with_arg    = xmce_set_fingerprint_wakeup_trigger_delay,
+                .values      = "ms",
+                .usage       =
+                        "set delay between identifying a finger and acting on it.\n"
+                        "\n"
+                        "Used for filtering out false positive fingerprints when user makes\n"
+                        "an attempt to press power key on devices where fingerprint scanner\n"
+                        "is located physically on power button.\n"
+                        "\n"
+                        "In devices that have dedicated fingerprint scanner it should be\n"
+                        "safe to set this delay to zero.\n"
+        },
+        {
+                .name        = "set-fingerprint-wakeup-throttle-delay",
+                .with_arg    = xmce_set_fingerprint_wakeup_throttle_delay,
+                .values      = "ms",
+                .usage       =
+                        "set delay between ipc attempts with fingerprint daemon.\n"
+                        "\n"
+                        "Used for both pacing dbus ipc to fingerprint daemon on failures, and\n"
+                        "allowing authentication services some time to grab fingerprint sensor\n"
+                        "when needed.\n"
+        },
+        {
                 .name        = "set-volume-key-policy",
                 .with_arg    = xmce_set_volkey_policy,
                 .values      = "default|media-only",
@@ -6033,18 +7036,23 @@ static const mce_opt_t options[] =
                         "set actions to execute on single power key press from display on state\n"
                         "\n"
                         "Valid actions are:\n"
-                        "  blank    - turn display off\n"
-                        "  tklock   - lock ui\n"
-                        "  devlock  - lock device\n"
-                        "  shutdown - power off device\n"
-                        "  vibrate  - play vibrate event via ngfd\n"
-                        "  unblank  - turn display on\n"
-                        "  tkunlock - unlock ui\n"
-                        "  dbus1    - send dbus signal or make method call\n"
-                        "  dbus2    - send dbus signal or make method call\n"
-                        "  dbus3    - send dbus signal or make method call\n"
+                        "  blank     - turn display off\n"
+                        "  tklock    - lock ui\n"
+                        "  devlock   - lock device\n"
+                        "  shutdown  - power off device\n"
+                        "  vibrate   - play vibrate event via ngfd\n"
+                        "  unblank   - turn display on\n"
+                        "  tkunlock  - unlock ui / prompt devicelock code\n"
+                        "  tkunlock2 - unlock ui if device is not locked\n"
+                        "  dbus1     - send dbus signal or make method call\n"
+                        "  dbus2     - send dbus signal or make method call\n"
+                        "  dbus3     - send dbus signal or make method call\n"
                         "   ...\n"
-                        "  dbus10   - send dbus signal or make method call\n"
+                        "  dbus10    - send dbus signal or make method call\n"
+                        "  nop       - dummy operation, for differentiating otherwise\n"
+                        "              identical single/double press actions (mce does not\n"
+                        "              wait for double presses double press actions are\n"
+                        "              the same as for a single press)\n"
                         "\n"
                         "Comma separated list of actions can be used.\n"
         },
@@ -6096,14 +7104,14 @@ static const mce_opt_t options[] =
         {
                 .name        = "set-touchscreen-gesture-actions",
                 .with_arg    = xmce_set_touchscreen_gesture_action,
-                .values      = "gesture_id,actions",
+                .values      = "gesture_id|doubletap|fpwakeup,actions",
                 .usage       =
                         "set actions to execute on touchscreen gestures\n"
                         "\n"
-                        "Gesture id is a number in 0...10 range. The values are hw specific,\n"
-                        "but 4 can be assumed to mean doubletap.\n"
+                        "Gesture id is a number in 0...19 range. The values are hw specific,\n"
+                        "but 4 can be assumed to mean doubletap and 16 fingerprint wakeup.\n"
                         "\n"
-                        "Actions are as with --set-display-on-single-powerkey-press-actions\n"
+                        "Actions are as with --set-display-on-single-powerkey-press-actions.\n"
         },
         {
                 .name        = "set-powerkey-dbus-action",
@@ -6361,7 +7369,29 @@ static const mce_opt_t options[] =
                 .with_arg    = xmce_set_ps_mode,
                 .values      = "enabled|disabled",
                         "set the ps mode; valid modes are:\n"
-                        "'enabled' and 'disabled'\n"
+                        "'enabled'  sensor is disabled/enabled based on policy\n"
+                        "           and other settings\n"
+                        "'disabled' sensor is never powered on by mce\n"
+        },
+        {
+                .name        = "set-ps-on-demand",
+                .with_arg    = xmce_set_ps_on_demand,
+                .values      = "enabled|disabled",
+                        "set the ps on-demand mode; valid modes are:\n"
+                        "'enabled'  sensor is powered up only when needed\n"
+                        "'disabled' sensor is always kept powered on\n"
+        },
+        {
+                .name        = "set-default-ps-uncover-delay",
+                .with_arg    = xmce_set_default_ps_uncover_delay,
+                .values      = "ms",
+                        "set the default ps uncover delay in milliseconds\n"
+        },
+        {
+                .name        = "set-incall-ps-uncover-delay",
+                .with_arg    = xmce_set_incall_ps_uncover_delay,
+                .values      = "ms",
+                        "set the incall ps uncover delay in milliseconds\n"
         },
         {
                 .name        = "set-ps-blocks-touch",
@@ -6540,6 +7570,28 @@ static const mce_opt_t options[] =
                 .usage       =
                         "request button backlight state\n"
                         "Valid states are: enabled and disabled.\n"
+        },
+        {
+                .name        = "set-button-backlight-mode",
+                .with_arg    = xmce_set_button_backlight_mode,
+                .values      = "off|on|policy",
+                .usage       =
+                        "request button backlight mode\n"
+                        "Valid modes are: off|on|policy.\n"
+        },
+        {
+                .name        = "set-button-backlight-off-delay",
+                .with_arg    = xmce_set_button_backlligut_off_delay,
+                .values      = "ms",
+                .usage       =
+                        "set delay for powering off button backlight.\n"
+                        "\n"
+                        "Set delay in ms for powering off the backlight for\n"
+                        "menu/home/back buttons.\n"
+                        "\n"
+                        "Use zero to keep the buttons light as long as the\n"
+                        "topmost application / system is prepared to handle\n"
+                        "button presses.\n"
         },
         {
                 .name        = "enable-led",
@@ -6916,6 +7968,57 @@ static const mce_opt_t options[] =
                         "will be reset to defaults set in /etc/mce/*.conf files.\n"
                         "If no keyish is given, all settings are reset.\n"
         },
+        {
+                .name        = "set-inactivity-shutdown-delay",
+                .with_arg    = xmce_set_inactivity_shutdown_delay,
+                .values      = "s",
+                        "set delay in seconds for automatic shutdown\n"
+                        "\n"
+                        "If the device is not in active use it will be\n"
+                        "automatically powered off after the given delay.\n"
+                        "\n"
+                        "Mostly this is assumed to be useful for developing\n"
+                        "purposes where juggling between several devices\n"
+                        "running in some blanking inhibit mode easily means\n"
+                        "that the device you need the next has empty battery.\n"
+                        "\n"
+                        "Using value smaller than "
+                        G_STRINGIFY(MCE_MINIMUM_INACTIVITY_SHUTDOWN_DELAY)
+                        " disables the feature.\n"
+        },
+#ifdef ENABLE_BATTERY_SIMULATION
+        {
+                .name        = "set-charger-type",
+                .with_arg    = mcetool_do_set_charger_type,
+                .values      =
+                        MCE_CHARGER_TYPE_NONE "|"
+                        MCE_CHARGER_TYPE_USB "|"
+                        MCE_CHARGER_TYPE_DCP "|"
+                        MCE_CHARGER_TYPE_HVDCP "|"
+                        MCE_CHARGER_TYPE_CDP "|"
+                        MCE_CHARGER_TYPE_WIRELESS "|"
+                        MCE_CHARGER_TYPE_OTHER,
+                .usage       =
+                        "Override charger type for debugging purposes\n"
+        },
+        {
+                .name        = "set-charger-state",
+                .with_arg    = mcetool_do_set_charger_state,
+                .values      =
+                        MCE_CHARGER_STATE_UNKNOWN"|"
+                        MCE_CHARGER_STATE_ON"|"
+                        MCE_CHARGER_STATE_OFF,
+                .usage       =
+                        "Override charger state for debugging purposes\n"
+        },
+        {
+                .name        = "set-battery-level",
+                .with_arg    = mcetool_do_set_battery_level,
+                .values      = "percent",
+                .usage       =
+                        "Override battery level for debugging purposes\n"
+        },
+#endif // ENABLE_BATTERY_SIMULATION
 
         // sentinel
         {
@@ -6928,10 +8031,12 @@ static const char version_text[] =
 PROG_NAME" v"G_STRINGIFY(PRG_VERSION)"\n"
 "Written by David Weinehall.\n"
 "\n"
-"Copyright (C) 2005-2011 Nokia Corporation.  All rights reserved.\n"
+"Copyright (c) 2005 - 2011 Nokia Corporation.  All rights reserved.\n"
+"Copyright (c) 2012 - 2020 Jolla Ltd.\n"
+"Copyright (c) 2019 - 2020 Open Mobile Platform LLC.\n"
 ;
 
-static bool mcetool_do_version(const char *arg)
+static __attribute__((__noreturn__)) bool mcetool_do_version(const char *arg)
 {
         (void)arg;
 
@@ -6939,7 +8044,7 @@ static bool mcetool_do_version(const char *arg)
         exit(EXIT_SUCCESS);
 }
 
-static bool mcetool_do_help(const char *arg)
+static __attribute__((__noreturn__)) bool mcetool_do_help(const char *arg)
 {
         fprintf(stdout,
                 "Mode Control Entity Tool\n"
@@ -6967,9 +8072,9 @@ static bool mcetool_do_help(const char *arg)
         exit(EXIT_SUCCESS);
 }
 
-static bool mcetool_do_long_help(const char *arg)
+static __attribute__((__noreturn__)) bool mcetool_do_long_help(const char *arg)
 {
-        return mcetool_do_help(arg ?: "all");
+        mcetool_do_help(arg ?: "all");
 }
 
 /* ========================================================================= *

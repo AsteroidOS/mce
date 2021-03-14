@@ -3,8 +3,12 @@
  * Headers for the generic I/O functionality for the Mode Control Entity
  * <p>
  * Copyright © 2007, 2009-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2012-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -24,6 +28,7 @@
 #include <sys/stat.h>
 
 #include <stdio.h>
+#include <stdbool.h>
 
 #include <glib.h>
 
@@ -69,6 +74,9 @@ typedef struct {
 	/** TRUE if missing path configuration error has already been
 	 *  written for this file */
 	gboolean invalid_config_reported;
+
+	/** For suppressing reporting of repeated errors */
+	int reported_errno;
 } output_state_t;
 
 typedef struct mce_io_mon_t mce_io_mon_t;
@@ -167,5 +175,13 @@ gboolean mce_io_save_file_atomic(const char *path,
 gboolean mce_io_update_file_atomic(const char *path,
 				   const void *data, size_t size,
 				   mode_t mode, gboolean keep_backup);
+
+/* Resume from suspend detection */
+void mce_io_init_resume_timer(void);
+void mce_io_quit_resume_timer(void);
+
+guint mce_io_add_watch(int fd, bool close_on_unref, GIOCondition cnd, GIOFunc io_cb, gpointer aptr);
+const char *mce_io_condition_repr (GIOCondition cond);
+const char *mce_io_status_name    (GIOStatus io_status);
 
 #endif /* _MCE_IO_H_ */

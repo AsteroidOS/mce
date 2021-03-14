@@ -3,8 +3,11 @@
  * Alarm interface module for the Mode Control Entity
  * <p>
  * Copyright © 2005-2009 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -104,9 +107,8 @@ static void alarm_sync_state_to_datapipe(alarm_ui_state_t state)
         goto EXIT;
 
     mce_log(LL_DEVEL, "alarm state = %s", alarm_state_repr(state));
-    execute_datapipe(&alarm_ui_state_pipe,
-                     GINT_TO_POINTER(state),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&alarm_ui_state_pipe,
+                       GINT_TO_POINTER(state));
 
 EXIT:
     return;

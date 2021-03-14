@@ -1,3 +1,519 @@
+mce (1.106.6) precise; urgency=low
+
+  * [mce] Use sensord.sock from /run. JB#52757
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 21 Jan 2021 19:05:44 +0200
+
+mce (1.106.5) precise; urgency=low
+
+  * [packaging] Use sailfish-mirror instead of upstream for dbus-glib. JB#51115
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 23 Sep 2020 10:18:28 +0300
+
+mce (1.106.4) precise; urgency=low
+
+  * [mce] Use dbus_gmain instead of dbus-glib. JB#51115
+  * [packaging] Raise dbus-1 version requirement. JB#51115
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 15 Sep 2020 07:39:53 +0300
+
+mce (1.106.3) precise; urgency=low
+
+  * [powerkey] Implement separate policy for allowing fpwakeups. Fixes JB#49634
+
+ -- Matti Kosola <matti.kosola@jollamobile.com>  Wed, 08 Jul 2020 15:42:21 +0300
+
+mce (1.106.2) precise; urgency=low
+
+  * [aarch64] Fix packaging systemd unit files. Contributes to JB#49681
+
+mce (1.106.1) precise; urgency=low
+
+  * [aarch64] Do not hardcode libdir in default module path. Contributes to JB#49681
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 03 Jul 2020 17:01:56 +0300
+
+mce (1.106.0) precise; urgency=low
+
+  * [inifiles] Fix faults in example configuration files
+  * [mce] Update maintenance related make rules
+  * [logging] Flush after each message when logging to stderr
+  * [battery-udev] Handle initial probe from idle callback
+  * [battery-udev] Enablers for configurable charger types. JB#49693
+  * [battery-udev] Enablers for forced udev property refreshing. JB#49693
+  * [battery-udev] Refresh all udev properties on heartbeat. Fixes JB#48324
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 25 Jun 2020 10:10:53 +0300
+
+mce (1.105.5) precise; urgency=low
+
+  * [aarch64] Specify libdir. Contributes to JB#49681
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 28 May 2020 11:17:11 +0300
+
+mce (1.105.4) precise; urgency=low
+
+  * [build] Fix build with the new systemd. Contributes to JB#45921
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 04 May 2020 09:40:41 +0300
+
+mce (1.105.3) precise; urgency=low
+
+  * [display] Reset blanking timers on compositor start/stop. Fixes JB#47904
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 04 Feb 2020 12:21:44 +0200
+
+mce (1.105.2) precise; urgency=low
+
+  * [build] Silence compilation warnings
+  * [battery] Do not report 100% when battery level is unknown. JB#48562
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 04 Feb 2020 09:49:05 +0200
+
+mce (1.105.1) precise; urgency=low
+
+  * [systemd] Add capabilities required by compositor killer. Fixes JB#48754
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 30 Jan 2020 19:00:06 +0200
+
+mce (1.105.0) precise; urgency=low
+
+  * [systemd] Sandbox the mce service. JB#37897 JB#44449
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 10 Jan 2020 10:45:43 +0200
+
+mce (1.104.3) precise; urgency=low
+
+  * [fingerprint] Use gesture actions for fingerprint wake up. Fixes JB#47437
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 25 Oct 2019 08:45:56 +0300
+
+mce (1.104.2) precise; urgency=low
+
+  * [display] Handle compositor exit during setUpdatesEnabled call. JB#47846
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 24 Oct 2019 11:17:07 +0300
+
+mce (1.104.1) precise; urgency=low
+
+  * [display] Retry failing brightness adjustments. Fixes JB#47450
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 17 Oct 2019 08:55:19 +0300
+
+mce (1.104.0) precise; urgency=low
+
+  * [battery-udev] Expose battery charging state. JB#44852
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 08 Oct 2019 13:50:08 +0300
+
+mce (1.103.0) precise; urgency=low
+
+  * [display] Add missing local function prototypes
+  * [display] Flush cached brightness when adjustment fails. Fixes JB#47229
+  * [display] Add wait state to compositor switchover. JB#46746
+  * [dummy_compositor] Add exit-on-enable option. JB#46746
+  * [mce-hybris] Enablers for masking hybris plugin features. JB#46746
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 12 Sep 2019 11:08:47 +0300
+
+mce (1.102.1) precise; urgency=low
+
+  * [display] Trigger extra blanking delay during bootup. Fixes JB#47170
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 11 Sep 2019 12:57:03 +0300
+
+mce (1.102.0) precise; urgency=low
+
+  * [battery-udev] Make charger type available on D-Bus. JB#38667
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 28 Aug 2019 09:48:03 +0300
+
+mce (1.101.0) precise; urgency=low
+
+  * [dummy_compositor] Implement dummy compositor D-Bus service. JB#46723
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 08 Aug 2019 15:33:40 +0300
+
+mce (1.100.7) precise; urgency=low
+
+  * [dbus] Handle D-Bus name owner handoff correctly. JB#46305
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 24 Jun 2019 10:39:40 +0300
+
+mce (1.100.6) precise; urgency=low
+
+  * [display] Reject LPM mode when lockscreen is not on screen. Fixes JB#21043
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 14 Jun 2019 09:24:00 +0300
+
+mce (1.100.5) precise; urgency=low
+
+  * [fingerprint] Disable sms/email led on fp wakeup. Fixes JB#43914
+  * [tklock] Do not unblank due to open cover on mce startup. Fixes JB#41255
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 12 Jun 2019 11:16:44 +0300
+
+mce (1.100.4) precise; urgency=low
+
+  * [fingerprint] Disable fp wakeup when lid is closed. Fixes JB#46167
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 11 Jun 2019 13:30:54 +0300
+
+mce (1.100.3) precise; urgency=low
+
+  * [mce] Unify license blurbs. JB#33684
+  * [mce] Update git url to git.sailfishos.org. JB#33684
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 28 May 2019 09:25:45 +0300
+
+mce (1.100.2) precise; urgency=low
+
+  * [common] Remove unused EXIT label
+  * [tklock] Add missing prototypes
+  * [tklock] Filter interaction expected notifications from lipstick
+  * [event-input] Do not trap Escape key in interactive state. Fixes JB#45292
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 28 Mar 2019 11:32:07 +0200
+
+mce (1.100.1) precise; urgency=low
+
+  * [dbus] Stricten org.nemomobile.compositor D-Bus policy. JB#45281
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 28 Mar 2019 08:38:20 +0200
+
+mce (1.100.0) precise; urgency=low
+
+  * [proximity] Normalize code style
+  * [proximity] Normalize datapipe tracking setup
+  * [proximity] Normalize settings tracking
+  * [doubletap] Normalize naming of variables used for datapipe tracking
+  * [powerkey] Do not treat ngfd request datapipe as having a state
+  * [powerkey] Normalize function naming
+  * [proximity] On-demand proximity sensor activation. Fixes JB#34789 MER#1562
+  * [proximity] Do not assume unknown sensor state equals not-covered
+  * [doubletap] Do not enable doubletap detection when proximity state is unknown
+  * [fingerprint] Do not enable fingerprint wakeups when p-sensor state is unknown
+  * [powerkey] Do not reset p-sensor override when sensor state is unknown
+  * [powerkey] Wait for p-sensor state before executing powerkey/gesture actions
+  * [tklock] Do not allow display wakeups when p-sensor state is unknown
+  * [tklock] Wait for p-sensor state before acting on fingerprint unlock
+  * [tklock] Wait for p-sensor state before acting on keyboard slide open
+  * [tklock] Keep p-sensor active while handling proximity locking
+  * [display] Ignore unblank D-Bus requests when p-sensor state is unknown
+  * [display] Wait for p-sensor state before acting on D-Bus requests
+  * [examples] Add config file to enable on-demand proximity sensor use
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 15 Mar 2019 12:34:29 +0200
+
+mce (1.99.10) precise; urgency=low
+
+  * [datapipe] Make datapipe_t structure opaque
+  * [datapipe] Add enablers for logging datapipe value changes
+  * [dbus] Fix peerinfo tracking on mce startup
+  * [tklock] Do not act on initial tklock request datapipe value. JB#44605
+  * [tklock] Do not deactivate lockscreen on mce restart. Fixes JB#44605
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 08 Mar 2019 18:30:32 +0200
+
+mce (1.99.9) precise; urgency=low
+
+  * [dbus] Try to avoid reporting negative suspend time. Fixes JB#44904
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 25 Feb 2019 07:50:38 +0200
+
+mce (1.99.8) precise; urgency=low
+
+  * [display] Trigger after-boot blanking delay only once. Fixes JB#44311
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 29 Jan 2019 09:39:03 +0200
+
+mce (1.99.7) precise; urgency=low
+
+  * [audiorouting] Derive music playback from media_state. Fixes JB#36733
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 28 Jan 2019 10:15:11 +0200
+
+mce (1.99.6) precise; urgency=low
+
+  * [settings] Do not filter lid sensor with als by default. Fixes JB#44452
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 24 Jan 2019 09:18:35 +0200
+
+mce (1.99.5) precise; urgency=low
+
+  * [mce-setting] Add setter for boolean config values
+  * [powersavemode] Fix array data indentation
+  * [powersavemode] Avoid unnecessary state evaluation
+  * [powersavemode] Disable forced-psm on charger connect. JB#43843
+  * [powersavemode] Do not trigger psm during mce startup. JB#43843
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 21 Dec 2018 15:56:30 +0200
+
+mce (1.99.4) precise; urgency=low
+
+  * [packaging] Remove man pages from package. Contributes to JB#24119
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 21 Dec 2018 10:14:20 +0200
+
+mce (1.99.3) precise; urgency=low
+
+  * [event-input] Do not poll datapipes
+  * [event-input] Conditionally use escape key as power key. Fixes JB#44179
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 19 Dec 2018 15:16:50 +0200
+
+mce (1.99.2) precise; urgency=low
+
+  * [battery-udev] Tweak battery full heuristics. Fixes JB#44036
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 19 Dec 2018 14:56:46 +0200
+
+mce (1.99.1) precise; urgency=low
+
+  * [display] Do not disable PSM brightness on setting change. Fixes JB#44169
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 14 Dec 2018 21:48:45 +0200
+
+mce (1.99.0) precise; urgency=low
+
+  * [cpu-keepalive] Flag keepalive wakeup method call as privileged
+  * [display] Flag lpm debugging method calls as privileged
+  * [mcetool] Add prototypes for all local functions
+  * [battery-udev] Add battery debugging D-Bus methods. Fixes JB#44072
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 14 Dec 2018 11:50:38 +0200
+
+mce (1.98.3) precise; urgency=low
+
+  * [display] Synchronize brightness after compositor changes. Fixes JB#44051
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 04 Dec 2018 11:12:41 +0200
+
+mce (1.98.2) precise; urgency=low
+
+  * [event-input] Handle input device that emit only gesture events. JB#43930
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 27 Nov 2018 15:59:14 +0200
+
+mce (1.98.1) precise; urgency=low
+
+  * [powersavemode] Use D-Bus types when constructing D-Bus message
+  * [powersavemode] Make PowerSaveMode activation criteria readable
+  * [dsme] Track thermal state from thermal manager. Fixes JB#43907
+  * [mcetool] Do not artificially limit PSM threshold setting
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 23 Nov 2018 15:23:10 +0200
+
+mce (1.98.0) precise; urgency=low
+
+  * [datapipe] Normalize inactivity datapipe execution
+  * [buttonbacklight] Power off backlight after timeout. JB#42094
+  * [buttonbacklight] Add enablers for overriding backlight policy. JB#42094
+  * [buttonbacklight] Add setting for backlight off delay. JB#42094
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 20 Nov 2018 14:03:40 +0200
+
+mce (1.97.2) precise; urgency=low
+
+  * [event-input] Do not skip volume key processing. JB#43764
+  * [settings] Deny keypad input device grabbing by default. Fixes JB#43764
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 12 Nov 2018 13:29:05 +0200
+
+mce (1.97.1) precise; urgency=low
+
+  * [display] Omit premature display state broadcast. JB#43703
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 05 Nov 2018 10:39:17 +0200
+
+mce (1.97.0) precise; urgency=low
+
+  * [led] Add proximity sensor debugging patterns. JB#43690
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 02 Nov 2018 12:24:50 +0200
+
+mce (1.96.1) precise; urgency=low
+
+  * [battery-statefs] Work around unreliable change notifications. JB#43282
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 01 Nov 2018 09:01:03 +0200
+
+mce (1.96.0) precise; urgency=low
+
+  * [mce-io] Make utility functions globally available
+  * [battery-udev] Add battery tracker that utilizes udev. Fixes JB#43282
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 30 Oct 2018 08:56:21 +0200
+
+mce (1.95.4) precise; urgency=low
+
+  * [mce-io] Augment resume detection with timerfd source. Fixes JB#43297
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 17 Oct 2018 09:07:46 +0300
+
+mce (1.95.3) precise; urgency=low
+
+  * [suspend] Expose suspend type within mce. JB#42611
+  * [display] Workaround state machine freeze on unblank. Fixes JB#42611
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 05 Oct 2018 11:58:55 +0300
+
+mce (1.95.2) precise; urgency=low
+
+  * [radiostates] Rewrite active/saved radio states handling. Fixes JB#43030
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 27 Sep 2018 14:33:01 +0300
+
+mce (1.95.1) precise; urgency=low
+
+  * [datapipe] Mass rename datatypes. JB#22475
+  * [datapipe] Mass rename functions. JB#22475
+  * [datapipe] Remove dead code. JB#22475
+  * [datapipe] Add name property for datapipes. JB#22475
+  * [mce] Use array based datapipe binding. JB#22475
+  * [datapipe] Make internal functions static. JB#22475
+  * [datapipe] Add datapipe_value(). JB#22475
+  * [als] Avoid using DATAPIPE_USE_CACHED in brightness re-evaluation. JB#22475
+  * [datapipe] Drop unused DATAPIPE_USE_CACHED enumeration value. JB#22475
+  * [datapipe] Drop useless datapipe_use_t enumeration. JB#22475
+  * [datapipe] Fix datapipes incorrectly marked as dynamic. JB#22475
+  * [datapipe] Drop unused DATAPIPE_DATA_DYNAMIC enumeration value. JB#22475
+  * [datapipe] Drop useless datapipe_data_t enumeration type. JB#22475
+  * [datapipe] Make cache control property of datapipe. JB#22475
+  * [datapipe] Use const pointers in datapipe. JB#22475
+  * [mce] Use datapipe_exec_full() for all datapipe actions. JB#22475
+  * [datapipe] Make datapipe_exec_output_triggers() static. JB#22475
+  * [datapipe] Refactor datapipe execution. JB#22475
+  * [datapipe] Detect and mitigate recursive datapipe execution. Fixes JB#22475
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Mon, 24 Sep 2018 08:50:58 +0300
+
+mce (1.95.0) precise; urgency=low
+
+  * [mce] Expand also intra-line tabs
+  * [tklock] Move cached datapipe values in one place
+  * [tklock] Unblank and tkunlock when device gets unlocked. JB#42135
+  * [fingerprint] Implement fingerprint wakeup. JB#42135
+  * [fingerprint] Work around fp scanner on power key issues. JB#42135
+  * [fingerprint] Add settings for controlling fingerprint wakeups. JB#42135
+  * [mce-lib] Add suspend proofed glib timeout lookalikes
+  * [fingerprint] Suspend proof timer and idle callbacks. JB#42135
+  * [settings] Fingerprint wakeups are disabled by default. JB#42135
+  * [tklock] Keep tklock submode and lockscreen state in sync. Fixes JB#42145
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 18 Sep 2018 13:44:53 +0300
+
+mce (1.94.5) precise; urgency=low
+
+  * [usbmode] Do not assume "busy" means connected. Fixes JB#42976
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 18 Sep 2018 11:36:51 +0300
+
+mce (1.94.4) precise; urgency=low
+
+  * [powerkey] Add "nop" powerkey action
+  * [fingerprint] Add support for debug led patterns
+  * [datapipe] Add datapipe for requesting ngfd event playback
+  * [tklock] Delay tklock removal until exit from LPM state is finished
+  * [tklock] Sync ipc state with submode changes
+  * [tklock] Exit from LPM on device unlock. JB#42145
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 16 Aug 2018 14:01:30 +0300
+
+mce (1.94.3) precise; urgency=low
+
+  * [mce] Parse static config before probing for fb device. Fixes JB#42607
+  * [als] Enable sensor before requesting notifications. Fixes JB#42677
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 15 Aug 2018 14:28:03 +0300
+
+mce (1.94.2) precise; urgency=low
+
+  * [powerkey] Handle synthesized gestures despite hw settings. Fixes JB#42261
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 29 Jun 2018 13:16:06 +0300
+
+mce (1.94.1) precise; urgency=low
+
+  * [display] Delay display off signal until backlight is off. Fixes JB#30476
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 29 Jun 2018 08:45:37 +0300
+
+mce (1.94.0) precise; urgency=low
+
+  * [display] Do not jump over variable initialization
+  * [mce-sensorfw] Do not retry loading of unavailable sensors. JB#41369
+  * [mce-sensorfw] Refactor mce - sensorfwd IPC. JB#41369
+  * [mce-sensorfw] Implement sensor-test mode for mce. JB#41369
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 01 Jun 2018 09:55:07 +0300
+
+mce (1.93.4) precise; urgency=low
+
+  * [dsme] Do not take shutdown actions on shutdown notification. JB#41302
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 10 Apr 2018 21:48:28 +0300
+
+mce (1.93.3) precise; urgency=low
+
+  * [display] Normalize whitespace
+  * [dsme] Make dsme message type identifiers unique. JB#38500
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Wed, 04 Apr 2018 08:54:16 +0300
+
+mce (1.93.2) precise; urgency=low
+
+  * [display] Unblank when compositor starts during bootup. JB#41302
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 29 Mar 2018 08:45:22 +0300
+
+mce (1.93.1) precise; urgency=low
+
+  * [tklock] Disable display state restore during bootup. JB#41395
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 23 Mar 2018 13:35:15 +0200
+
+mce (1.93.0) precise; urgency=low
+
+  * [datapipe] Remove lintisms. JB#22475
+  * [datapipe] Use macro for making tklock requests. JB#22475
+  * [datapipe] Use macro for making display state requests. JB#22475
+  * [mce] Make tristate_t type generally available. JB#22475
+  * [datapipe] Add init_done_pipe. JB#22475
+  * [dsme] End transition submode on init_done condition. JB#22475
+  * [inactivity] Optional shutdown after idling. Fixes MER#1889
+  * [display] Track pid of topmost window. JB#41340
+  * [display] Add blanking pause allowed -policy. JB#41340
+  * [display] Allow blanking pause when app is on top of lockscreen. JB#41340
+  * [dbus] Add dbus peer tracking api. JB#41340
+  * [dbus] Cleanup mce-dbus header file. JB#41340
+  * [display] Only topmost application can pause blanking. JB#41340
+  * [display] Expose blanking pause allowed -policy on dbus. JB#41340
+  * [display] Add slack to blanking pause timeout. JB#41340
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Tue, 20 Mar 2018 10:58:11 +0200
+
+mce (1.92.0) precise; urgency=low
+
+  * [build] Remove unneeded include statements
+  * [logging] Log human readable state names instead of enumeration values
+  * [fingerprint] Ignore powerkey during fingerprint enroll. Fixes JB#41217
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 01 Mar 2018 15:12:37 +0200
+
+mce (1.91.1) precise; urgency=low
+
+  * [datapipe] Unify naming. Contributes to JB#22475
+  * [battery-bme] Use charger_state_t instead of gboolean
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Thu, 01 Mar 2018 12:58:10 +0200
+
+mce (1.91.0) precise; urgency=low
+
+  * [tklock] Add settings for proximity sensor uncover delays. Fixes MER#1881
+
+ -- Simo Piiroinen <simo.piiroinen@jollamobile.com>  Fri, 23 Feb 2018 15:15:26 +0200
+
 mce (1.90.4) precise; urgency=low
 
   * [display] Enable/disable autosuspend from worker thread. Fixes JB#40265

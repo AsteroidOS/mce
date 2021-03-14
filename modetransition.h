@@ -3,8 +3,10 @@
  * Headers for the mode transition component of the Mode Control Entity
  * <p>
  * Copyright © 2004-2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2018-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -24,11 +26,11 @@
 #include <glib.h>
 
 /** Path to the boot detection file */
-#define MCE_BOOTUP_FILENAME		G_STRINGIFY(MCE_RUN_DIR) "/boot"
+#define MCE_BOOTUP_FILENAME             G_STRINGIFY(MCE_RUN_DIR) "/boot"
 
-#define SPLASH_DELAY			500		/**< 0.5 seconds */
-#define ACTDEAD_DELAY			1500		/**< 1.5 seconds */
-#define POWERUP_DELAY			3500		/**< 3.5 seconds */
+#define SPLASH_DELAY                    500             /**< 0.5 seconds */
+#define ACTDEAD_DELAY                   1500            /**< 1.5 seconds */
+#define POWERUP_DELAY                   3500            /**< 3.5 seconds */
 
 /* When MCE is made modular, this will be handled differently */
 gboolean mce_mode_init(void);

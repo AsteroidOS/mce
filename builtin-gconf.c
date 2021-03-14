@@ -1,8 +1,23 @@
-/* ------------------------------------------------------------------------- *
- * Copyright (C) 2012-2014 Jolla Ltd.
- * Contact: Simo Piiroinen <simo.piiroinen@jollamobile.com>
- * License: LGPLv2
- * ------------------------------------------------------------------------- */
+/**
+ * @file builtin-gconf.c
+ * GConf compatibility module - for dynamic mce settings
+ * <p>
+ * Copyright (C) 2012-2019 Jolla Ltd.
+ * <p>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ *
+ * mce is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
+ *
+ * mce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 /* ------------------------------------------------------------------------- *
  * NOTE: This module implements just enough of the GConf API to allow us
@@ -21,18 +36,19 @@
 #include "mce-log.h"
 #include "mce-io.h"
 #include "mce-dbus.h"
+#include "mce-setting.h"
 
 #include "powerkey.h"
 #include "tklock.h"
 #include "event-input.h"
 
 #include "modules/memnotify.h"
-#include "modules/filter-brightness-als.h"
 #include "modules/display.h"
 #include "modules/proximity.h"
 #include "modules/powersavemode.h"
 #include "modules/doubletap.h"
 #include "modules/led.h"
+#include "modules/inactivity.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1562,6 +1578,31 @@ static const setting_t gconf_defaults[] =
     .def  = G_STRINGIFY(false),
   },
   {
+    .key  = MCE_SETTING_LED_PATH"/"MCE_LED_PATTERN_SCANNING_FINGERPRINT,
+    .type = "b",
+    .def  = G_STRINGIFY(false),
+  },
+  {
+    .key  = MCE_SETTING_LED_PATH"/"MCE_LED_PATTERN_FINGERPRINT_ACQUIRED,
+    .type = "b",
+    .def  = G_STRINGIFY(false),
+  },
+  {
+    .key  = MCE_SETTING_LED_PATH"/"MCE_LED_PATTERN_PROXIMITY_COVERED,
+    .type = "b",
+    .def  = G_STRINGIFY(false),
+  },
+  {
+    .key  = MCE_SETTING_LED_PATH"/"MCE_LED_PATTERN_PROXIMITY_UNCOVERING,
+    .type = "b",
+    .def  = G_STRINGIFY(false),
+  },
+  {
+    .key  = MCE_SETTING_LED_PATH"/"MCE_LED_PATTERN_PROXIMITY_UNCOVERED,
+    .type = "b",
+    .def  = G_STRINGIFY(false),
+  },
+  {
     .key  = MCE_SETTING_LED_SW_BREATH_ENABLED,
     .type = "b",
     .def  = G_STRINGIFY(MCE_DEFAULT_LED_SW_BREATH_ENABLED),
@@ -1577,6 +1618,11 @@ static const setting_t gconf_defaults[] =
     .def  = G_STRINGIFY(MCE_DEFAULT_PROXIMITY_PS_ENABLED),
   },
   {
+    .key  = MCE_SETTING_PROXIMITY_ON_DEMAND,
+    .type = "b",
+    .def  = G_STRINGIFY(MCE_DEFAULT_PROXIMITY_ON_DEMAND),
+  },
+  {
     .key  = MCE_SETTING_PROXIMITY_PS_ACTS_AS_LID,
     .type = "b",
     .def  = G_STRINGIFY(MCE_DEFAULT_PROXIMITY_PS_ACTS_AS_LID),
@@ -1585,6 +1631,26 @@ static const setting_t gconf_defaults[] =
     .key  = MCE_SETTING_DOUBLETAP_MODE,
     .type = "i",
     .def  = G_STRINGIFY(MCE_DEFAULT_DOUBLETAP_MODE),
+  },
+  {
+    .key  = MCE_SETTING_FPWAKEUP_MODE,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_FPWAKEUP_MODE),
+  },
+  {
+    .key  = MCE_SETTING_FPWAKEUP_ALLOW_DELAY,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_FPWAKEUP_ALLOW_DELAY),
+  },
+  {
+    .key  = MCE_SETTING_FPWAKEUP_TRIGGER_DELAY,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_FPWAKEUP_TRIGGER_DELAY),
+  },
+  {
+    .key  = MCE_SETTING_FPWAKEUP_THROTTLE_DELAY,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_FPWAKEUP_THROTTLE_DELAY),
   },
   {
     .key  = MCE_SETTING_POWERKEY_MODE,
@@ -1700,6 +1766,51 @@ static const setting_t gconf_defaults[] =
     .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE10,
     .type = "s",
     .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE10,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE11,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE11,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE12,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE12,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE13,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE13,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE14,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE14,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE15,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE15,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE16,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE16,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE17,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE17,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE18,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE18,
+  },
+  {
+    .key  = MCE_SETTING_POWERKEY_ACTIONS_GESTURE19,
+    .type = "s",
+    .def  = MCE_DEFAULT_POWERKEY_ACTIONS_GESTURE19,
   },
   {
     .key  = MCE_SETTING_POWERKEY_DBUS_ACTION1,
@@ -1835,6 +1946,26 @@ static const setting_t gconf_defaults[] =
     .key  = MCE_SETTING_TK_LOCKSCREEN_ANIM_ENABLED,
     .type = "b",
     .def  = G_STRINGIFY(MCE_DEFAULT_TK_LOCKSCREEN_ANIM_ENABLED),
+  },
+  {
+    .key  = MCE_SETTING_TK_PROXIMITY_DELAY_DEFAULT,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_TK_PROXIMITY_DELAY_DEFAULT),
+  },
+  {
+    .key  = MCE_SETTING_TK_PROXIMITY_DELAY_INCALL,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_TK_PROXIMITY_DELAY_INCALL),
+  },
+  {
+    .key  = MCE_SETTING_INACTIVITY_SHUTDOWN_DELAY,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_INACTIVITY_SHUTDOWN_DELAY),
+  },
+  {
+    .key  = MCE_SETTING_BUTTONBACKLIGHT_OFF_DELAY,
+    .type = "i",
+    .def  = G_STRINGIFY(MCE_DEFAULT_BUTTONBACKLIGHT_OFF_DELAY),
   },
   {
     .key  = NULL,

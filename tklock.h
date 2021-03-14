@@ -4,8 +4,15 @@
  * of the Mode Control Entity
  * <p>
  * Copyright © 2004-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Mika Laitio <lamikr@pilppa.org>
+ * @author Markus Lehtonen <markus.lehtonen@iki.fi>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -23,8 +30,6 @@
 # define TKLOCK_H_
 
 # include "mce.h"
-
-# include <glib.h>
 
 /* ========================================================================= *
  * Settings
@@ -96,7 +101,7 @@ enum
  * by hall effect sensors confused by unexpected magnetic fields.
  */
 # define MCE_SETTING_TK_FILTER_LID_WITH_ALS      MCE_SETTING_TK_PATH"/filter_lid_with_als"
-# define MCE_DEFAULT_TK_FILTER_LID_WITH_ALS      true
+# define MCE_DEFAULT_TK_FILTER_LID_WITH_ALS      false
 
 /** Maximum amount of light ALS is expected to report when LID is closed */
 # define MCE_SETTING_TK_FILTER_LID_ALS_LIMIT     MCE_SETTING_TK_PATH"/filter_lid_als_limit"
@@ -247,6 +252,18 @@ typedef enum {
 /** Whether mce should allow lockscreen animations on unblank */
 # define MCE_SETTING_TK_LOCKSCREEN_ANIM_ENABLED  MCE_SETTING_TK_PATH "/lockscreen_animation_enabled"
 # define MCE_DEFAULT_TK_LOCKSCREEN_ANIM_ENABLED  true
+
+/** Default proximity sensor uncover handling [ms]*/
+# define MCE_SETTING_TK_PROXIMITY_DELAY_DEFAULT  MCE_SETTING_TK_PATH "/proximity_delay_default"
+# define MCE_DEFAULT_TK_PROXIMITY_DELAY_DEFAULT  100
+
+/** In-call proximity sensor uncover handling [ms]*/
+# define MCE_SETTING_TK_PROXIMITY_DELAY_INCALL   MCE_SETTING_TK_PATH "/proximity_delay_incall"
+# define MCE_DEFAULT_TK_PROXIMITY_DELAY_INCALL   500
+
+/** Accpeted range for proximity sensor uncover delay: [0s, 1h] */
+# define MCE_MINIMUM_TK_PROXIMITY_DELAY          0
+# define MCE_MAXIMUM_TK_PROXIMITY_DELAY          (60 * 60 * 1000)
 
 /* ========================================================================= *
  * Configuration

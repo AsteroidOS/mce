@@ -2,9 +2,12 @@
  * @file mce-log.c
  * Logging functions for Mode Control Entity
  * <p>
- * Copyright © 2006-2007, 2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2006 - 2007, 2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2012 - 2020 Jolla Ltd.
+ * Copyright (c) 2020 Open Mobile Platform LLC.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -66,6 +69,7 @@ static void timestamp(struct timeval *tv)
 			mce_log_name(),
 			(long)diff.tv_sec, (long)(diff.tv_usec/1000),
 			"END OF BURST");
+		fflush(stderr);
 		start = *tv;
 	}
 	prev = *tv;
@@ -158,6 +162,69 @@ EXIT:
 	return str;
 }
 
+/* There is false positive warning during compilation:
+ *
+ * "function might be possible candidate for 'gnu_printf' format attribute"
+ *
+ * Instead of disabling the whole check via -Wno-suggest-attribute=format,
+ * use pragmas locally to sweep the issue under carpet...
+ */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wsuggest-attribute=format"
+
+void mce_log_unconditional_va(loglevel_t loglevel, const char *const file,
+		    const char *const function, const char *const fmt, va_list va)
+{
+    gchar *msg = 0;
+
+    g_vasprintf(&msg, fmt, va);
+
+    if( file && function ) {
+	gchar *tmp = g_strconcat(file, ": ", function, "(): ",
+				 mce_log_strip_string(msg), NULL);
+	g_free(msg), msg = tmp;
+    }
+
+    if (logtype == MCE_LOG_STDERR) {
+	struct timeval tv;
+	timestamp(&tv);
+	fprintf(stderr, "%s: T+%ld.%03ld %s: %s\n",
+		mce_log_name(),
+		(long)tv.tv_sec, (long)(tv.tv_usec/1000),
+		mce_log_level_tag(loglevel),
+		msg);
+	fflush(stderr);
+    } else {
+	/* Use NOTICE priority when reporting LL_EXTRA
+	 * and LL_CRUCIAL logging */
+	switch( loglevel ) {
+	case LL_EXTRA:
+	case LL_CRUCIAL:
+	    loglevel = LL_NOTICE;
+	    break;
+	default:
+	    break;
+	}
+
+	/* loglevels are subset of syslog priorities, so
+	 * we can use loglevel as is for syslog priority */
+	syslog(loglevel, "%s", msg);
+    }
+
+    g_free(msg);
+}
+
+#pragma GCC diagnostic pop
+
+void mce_log_unconditional(loglevel_t loglevel, const char *const file,
+		 const char *const function, const char *const fmt, ...)
+{
+    va_list va;
+    va_start(va, fmt);
+    mce_log_unconditional_va(loglevel, file, function, fmt, va);
+    va_end(va);
+}
+
 /**
  * Log debug message with optional filename and function name attached
  *
@@ -168,49 +235,13 @@ EXIT:
 void mce_log_file(loglevel_t loglevel, const char *const file,
 		  const char *const function, const char *const fmt, ...)
 {
-	va_list args;
-
 	loglevel = mce_log_level_clip(loglevel);
 
 	if( mce_log_p_(loglevel, file, function) ) {
-		gchar *msg = 0;
-
-		va_start(args, fmt);
-		g_vasprintf(&msg, fmt, args);
-		va_end(args);
-
-		if( file && function ) {
-			gchar *tmp = g_strconcat(file, ": ", function, "(): ",
-						 mce_log_strip_string(msg), NULL);
-			g_free(msg), msg = tmp;
-		}
-
-		if (logtype == MCE_LOG_STDERR) {
-			struct timeval tv;
-			timestamp(&tv);
-			fprintf(stderr, "%s: T+%ld.%03ld %s: %s\n",
-				mce_log_name(),
-				(long)tv.tv_sec, (long)(tv.tv_usec/1000),
-				mce_log_level_tag(loglevel),
-				msg);
-		} else {
-			/* Use NOTICE priority when reporting LL_EXTRA
-			 * and LL_CRUCIAL logging */
-			switch( loglevel ) {
-			case LL_EXTRA:
-			case LL_CRUCIAL:
-				loglevel = LL_NOTICE;
-				break;
-			default:
-				break;
-			}
-
-			/* loglevels are subset of syslog priorities, so
-			 * we can use loglevel as is for syslog priority */
-			syslog(loglevel, "%s", msg);
-		}
-
-		g_free(msg);
+	    va_list va;
+	    va_start(va, fmt);
+	    mce_log_unconditional_va(loglevel, file, function, fmt, va);
+	    va_end(va);
 	}
 }
 

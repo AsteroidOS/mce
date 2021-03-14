@@ -3,8 +3,10 @@
  * Headers for the logging functions for Mode Control Entity
  * <p>
  * Copyright © 2006-2007, 2009-2010 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2012-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -22,6 +24,7 @@
 # define MCE_LOG_H_
 
 # include <syslog.h>
+# include <stdarg.h>
 
 # define MCE_LOG_SYSLOG		1	/**< Log to syslog */
 # define MCE_LOG_STDERR		0	/**< Log to stderr */
@@ -61,6 +64,12 @@ int  mce_log_get_verbosity(void);
 
 int  mce_log_p_(loglevel_t loglevel,
 		const char *const file, const char *const function);
+
+void mce_log_unconditional_va(loglevel_t loglevel, const char *const file, const char *const function, const char *const fmt, va_list va);
+
+void mce_log_unconditional(loglevel_t loglevel, const char *const file,
+		 const char *const function, const char *const fmt, ...)
+		  __attribute__((format(printf, 4, 5)));
 
 void mce_log_file(loglevel_t loglevel, const char *const file,
 		  const char *const function, const char *const fmt, ...)

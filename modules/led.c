@@ -2,9 +2,17 @@
  * @file led.c
  * LED module -- this handles the LED logic for MCE
  * <p>
- * Copyright © 2006-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2006 - 2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (c) 2012 - 2020 Jolla Ltd.
+ * Copyright (c) 2020 Open Mobile Platform LLC.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ * @author Islam Amer <islam.amer@jollamobile.com>
+ * @author Filip Matijević <filip.matijevic.pz@gmail.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -50,6 +58,7 @@
 #include <fcntl.h>
 
 #include <mce/dbus-names.h>
+#include <mce/mode-names.h>
 
 #include <gmodule.h>
 
@@ -293,10 +302,10 @@ static gchar *engine2_leds_path = NULL;
 static gchar *engine3_leds_path = NULL;
 
 /** Cached display state */
-static display_state_t display_state = MCE_DISPLAY_UNDEF;
+static display_state_t display_state_curr = MCE_DISPLAY_UNDEF;
 
 /** Cached system state */
-static system_state_t system_state = MCE_STATE_UNDEF;
+static system_state_t system_state = MCE_SYSTEM_STATE_UNDEF;
 
 /** Cached led brightness */
 static gint led_brightness = 0;
@@ -352,8 +361,8 @@ static void              type6_lock_in_cb               (void *data, void *aptr)
 static void              type6_revert_cb                (void *data, void *aptr);
 static void              type6_deactivate_cb            (void *data, void *aptr);
 static void              led_pattern_op                 (GFunc cb);
-static void              user_activity_trigger          (gconstpointer data);
-static void              display_state_trigger          (gconstpointer data);
+static void              user_activity_event_trigger    (gconstpointer data);
+static void              display_state_curr_trigger     (gconstpointer data);
 static void              led_brightness_trigger         (gconstpointer data);
 static void              led_pattern_activate_trigger   (gconstpointer data);
 static void              led_pattern_deactivate_trigger (gconstpointer data);
@@ -717,16 +726,16 @@ static void lysti_set_brightness(gint brightness)
 
 	if (get_led_type() == LED_TYPE_LYSTI_MONO) {
 		/* If we have a monochrome LED only set one brightness */
-		(void)mce_write_number_string_to_file(&led_current_rm_output, r_brightness);
+		mce_write_number_string_to_file(&led_current_rm_output, r_brightness);
 
 		mce_log(LL_DEBUG,
 			"Brightness set to %d",
 			active_brightness);
 	} else if (get_led_type() == LED_TYPE_LYSTI_RGB) {
 		/* If we have an RGB LED set the brightness for all channels */
-		(void)mce_write_number_string_to_file(&led_current_rm_output, r_brightness);
-		(void)mce_write_number_string_to_file(&led_current_g_output, g_brightness);
-		(void)mce_write_number_string_to_file(&led_current_b_output, b_brightness);
+		mce_write_number_string_to_file(&led_current_rm_output, r_brightness);
+		mce_write_number_string_to_file(&led_current_g_output, g_brightness);
+		mce_write_number_string_to_file(&led_current_b_output, b_brightness);
 
 		mce_log(LL_DEBUG,
 			"Brightness set to %d (%d, %d, %d)",
@@ -768,8 +777,8 @@ static void njoy_set_brightness(gint brightness)
 		active_brightness = brightness;
 	}
 
-	(void)mce_write_number_string_to_file(&led_brightness_rm_output,
-					      (unsigned)active_brightness);
+	mce_write_number_string_to_file(&led_brightness_rm_output,
+					(unsigned)active_brightness);
 
 	mce_log(LL_DEBUG, "Brightness set to %d", active_brightness);
 }
@@ -790,8 +799,8 @@ static void mono_set_brightness(gint brightness)
 		return;
 
 	active_brightness = brightness;
-	(void)mce_write_string_to_file(led_brightness_rm_output.path,
-				       brightness_map[brightness]);
+	mce_write_string_to_file(led_brightness_rm_output.path,
+				 brightness_map[brightness]);
 
 	mce_log(LL_DEBUG, "Brightness set to %d", brightness);
 }
@@ -833,21 +842,21 @@ static void hybris_set_brightness(gint brightness)
 static void lysti_disable_led(void)
 {
 	/* Disable engine 1 */
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_DISABLED_MODE);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_DISABLED_MODE);
 
 	if (get_led_type() == LED_TYPE_LYSTI_MONO) {
 		/* Turn off the led */
-		(void)mce_write_number_string_to_file(&led_brightness_rm_output, 0);
+		mce_write_number_string_to_file(&led_brightness_rm_output, 0);
 	} else if (get_led_type() == LED_TYPE_LYSTI_RGB) {
 		/* Disable engine 2 */
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_DISABLED_MODE);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_DISABLED_MODE);
 
 		/* Turn off all three leds */
-		(void)mce_write_number_string_to_file(&led_brightness_rm_output, 0);
-		(void)mce_write_number_string_to_file(&led_brightness_g_output, 0);
-		(void)mce_write_number_string_to_file(&led_brightness_b_output, 0);
+		mce_write_number_string_to_file(&led_brightness_rm_output, 0);
+		mce_write_number_string_to_file(&led_brightness_g_output, 0);
+		mce_write_number_string_to_file(&led_brightness_b_output, 0);
 	}
 }
 
@@ -857,25 +866,25 @@ static void lysti_disable_led(void)
 static void njoy_disable_led(void)
 {
 	/* Disable engine 1 */
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_DISABLED_MODE);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_DISABLED_MODE);
 
 	if (get_led_type() == LED_TYPE_NJOY_MONO) {
 		/* Turn off the led */
-		(void)mce_write_number_string_to_file(&led_brightness_rm_output, 0);
+		mce_write_number_string_to_file(&led_brightness_rm_output, 0);
 	} else if (get_led_type() == LED_TYPE_NJOY_RGB) {
 		/* Disable engine 2 */
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_DISABLED_MODE);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_DISABLED_MODE);
 
 		/* Disable engine 3 */
-		(void)mce_write_string_to_file(engine3_mode_path,
-					       MCE_LED_DISABLED_MODE);
+		mce_write_string_to_file(engine3_mode_path,
+					 MCE_LED_DISABLED_MODE);
 
 		/* Turn off all three leds */
-		(void)mce_write_number_string_to_file(&led_brightness_rm_output, 0);
-		(void)mce_write_number_string_to_file(&led_brightness_g_output, 0);
-		(void)mce_write_number_string_to_file(&led_brightness_b_output, 0);
+		mce_write_number_string_to_file(&led_brightness_rm_output, 0);
+		mce_write_number_string_to_file(&led_brightness_g_output, 0);
+		mce_write_number_string_to_file(&led_brightness_b_output, 0);
 	}
 }
 
@@ -884,8 +893,8 @@ static void njoy_disable_led(void)
  */
 static void mono_disable_led(void)
 {
-	(void)mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
-				       MCE_LED_TRIGGER_NONE);
+	mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
+				 MCE_LED_TRIGGER_NONE);
 	mono_set_brightness(0);
 }
 
@@ -1147,29 +1156,29 @@ static void lysti_program_led(const pattern_struct *const pattern)
 	/* Load new patterns, one engine at a time */
 
 	/* Engine 1 */
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_LOAD_MODE);
-	(void)mce_write_string_to_file(engine1_leds_path,
-				       bin_to_string(pattern->engine1_mux));
-	(void)mce_write_string_to_file(engine1_load_path,
-				       pattern->channel1);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_LOAD_MODE);
+	mce_write_string_to_file(engine1_leds_path,
+				 bin_to_string(pattern->engine1_mux));
+	mce_write_string_to_file(engine1_load_path,
+				 pattern->channel1);
 
 	/* Engine 2; if needed */
 	if (get_led_type() == LED_TYPE_LYSTI_RGB) {
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_LOAD_MODE);
-		(void)mce_write_string_to_file(engine2_leds_path,
-					       bin_to_string(pattern->engine2_mux));
-		(void)mce_write_string_to_file(engine2_load_path,
-					       pattern->channel2);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_LOAD_MODE);
+		mce_write_string_to_file(engine2_leds_path,
+					 bin_to_string(pattern->engine2_mux));
+		mce_write_string_to_file(engine2_load_path,
+					 pattern->channel2);
 
 		/* Run the new pattern; enable engines in reverse order */
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_RUN_MODE);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_RUN_MODE);
 	}
 
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_RUN_MODE);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_RUN_MODE);
 
 	/* Save what colors we are driving */
 	current_lysti_led_pattern = pattern->engine1_mux | pattern->engine2_mux;
@@ -1193,33 +1202,33 @@ static void njoy_program_led(const pattern_struct *const pattern)
 	/* Load new patterns */
 
 	/* Engine 1 */
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_LOAD_MODE);
-	(void)mce_write_string_to_file(engine1_load_path,
-				       pattern->channel1);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_LOAD_MODE);
+	mce_write_string_to_file(engine1_load_path,
+				 pattern->channel1);
 
 	if (get_led_type() == LED_TYPE_NJOY_RGB) {
 		/* Engine 2 */
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_LOAD_MODE);
-		(void)mce_write_string_to_file(engine2_load_path,
-					       pattern->channel2);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_LOAD_MODE);
+		mce_write_string_to_file(engine2_load_path,
+					 pattern->channel2);
 
 		/* Engine 3 */
-		(void)mce_write_string_to_file(engine3_mode_path,
-					       MCE_LED_LOAD_MODE);
-		(void)mce_write_string_to_file(engine3_load_path,
-					       pattern->channel3);
+		mce_write_string_to_file(engine3_mode_path,
+					 MCE_LED_LOAD_MODE);
+		mce_write_string_to_file(engine3_load_path,
+					 pattern->channel3);
 
 		/* Run the new pattern; enable engines in reverse order */
-		(void)mce_write_string_to_file(engine3_mode_path,
-					       MCE_LED_RUN_MODE);
-		(void)mce_write_string_to_file(engine2_mode_path,
-					       MCE_LED_RUN_MODE);
+		mce_write_string_to_file(engine3_mode_path,
+					 MCE_LED_RUN_MODE);
+		mce_write_string_to_file(engine2_mode_path,
+					 MCE_LED_RUN_MODE);
 	}
 
-	(void)mce_write_string_to_file(engine1_mode_path,
-				       MCE_LED_RUN_MODE);
+	mce_write_string_to_file(engine1_mode_path,
+				 MCE_LED_RUN_MODE);
 
 	/* Reset brightness */
 	njoy_set_brightness(-1);
@@ -1257,15 +1266,15 @@ static void mono_program_led(const pattern_struct *const pattern)
 	 * use a timer trigger, otherwise disable the trigger
 	 */
 	if (pattern->off_period != 0) {
-		(void)mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
-					       MCE_LED_TRIGGER_TIMER);
-		(void)mce_write_number_string_to_file(&led_off_period_output,
-						      (unsigned)pattern->off_period);
-		(void)mce_write_number_string_to_file(&led_on_period_output,
-						      (unsigned)pattern->on_period);
+		mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
+					 MCE_LED_TRIGGER_TIMER);
+		mce_write_number_string_to_file(&led_off_period_output,
+						(unsigned)pattern->off_period);
+		mce_write_number_string_to_file(&led_on_period_output,
+						(unsigned)pattern->on_period);
 	} else {
-		(void)mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
-					       MCE_LED_TRIGGER_NONE);
+		mce_write_string_to_file(MCE_LED_TRIGGER_PATH,
+					 MCE_LED_TRIGGER_NONE);
 	}
 
 	mono_set_brightness(pattern->brightness);
@@ -1464,13 +1473,13 @@ static void led_update_active_pattern(void)
 
 		/* Show pattern with visibility 7 if display is dimmed */
 		if( new_active_pattern->policy == 7 ) {
-			if( display_state == MCE_DISPLAY_DIM )
+			if( display_state_curr == MCE_DISPLAY_DIM )
 				break;
 			continue;
 		}
 
 		/* Acting dead behaviour */
-		if (system_state == MCE_STATE_ACTDEAD) {
+		if (system_state == MCE_SYSTEM_STATE_ACTDEAD) {
 			/* If we're in acting dead,
 			 * show patterns with visibility 4
 			 */
@@ -1480,7 +1489,7 @@ static void led_update_active_pattern(void)
 			/* If we're in acting dead
 			 * and the display is off, show pattern
 			 */
-			if (display_off_p(display_state) &&
+			if (display_off_p(display_state_curr) &&
 			    (new_active_pattern->policy == 2))
 				break;
 
@@ -1493,7 +1502,7 @@ static void led_update_active_pattern(void)
 		/* If the display is off or in low power mode,
 		 * we can use any active pattern
 		 */
-		if( display_off_p(display_state) )
+		if( display_off_p(display_state_curr) )
 			break;
 
 		/* If the pattern should be shown with screen on, use it */
@@ -1791,11 +1800,11 @@ static void led_pattern_op(GFunc cb)
  *
  * @param data Unused
  */
-static void user_activity_trigger(gconstpointer data)
+static void user_activity_event_trigger(gconstpointer data)
 {
 	(void)data; // the data is irrelevant
 
-	if( display_state == MCE_DISPLAY_ON )
+	if( display_state_curr == MCE_DISPLAY_ON )
 		led_pattern_op(type6_revert_cb);
 	get_monotime(&activity_time);
 }
@@ -1805,24 +1814,24 @@ static void user_activity_trigger(gconstpointer data)
  *
  * @param data Unused
  */
-static void display_state_trigger(gconstpointer data)
+static void display_state_curr_trigger(gconstpointer data)
 {
-	display_state_t prev = display_state;
-	display_state = GPOINTER_TO_INT(data);
+	display_state_t prev = display_state_curr;
+	display_state_curr = GPOINTER_TO_INT(data);
 
 	struct timeval tv;
 
-	if (prev == display_state)
+	if (prev == display_state_curr)
 		goto EXIT;
 
-	mce_log(LL_DEBUG, "display_state: %s -> %s",
+	mce_log(LL_DEBUG, "display_state_curr: %s -> %s",
 		display_state_repr(prev),
-		display_state_repr(display_state));
+		display_state_repr(display_state_curr));
 
 	get_monotime(&tv);
 	timersub(&tv, &activity_time, &tv);
 
-	switch( display_state ) {
+	switch( display_state_curr ) {
 	case MCE_DISPLAY_ON:
 		if( timercmp(&tv, &activity_limit, <) )
 			led_pattern_op(type6_deactivate_cb);
@@ -2414,9 +2423,8 @@ static gboolean init_lysti_patterns(void)
 	init_combination_rules();
 
 	/* Set the LED brightness */
-	execute_datapipe(&led_brightness_pipe,
-			 GINT_TO_POINTER(maximum_led_brightness),
-			 USE_INDATA, CACHE_INDATA);
+	datapipe_exec_full(&led_brightness_pipe,
+			   GINT_TO_POINTER(maximum_led_brightness));
 
 	status = TRUE;
 
@@ -2547,9 +2555,8 @@ static gboolean init_njoy_patterns(void)
 	}
 
 	/* Set the LED brightness */
-	execute_datapipe(&led_brightness_pipe,
-			 GINT_TO_POINTER(maximum_led_brightness),
-			 USE_INDATA, CACHE_INDATA);
+	datapipe_exec_full(&led_brightness_pipe,
+			   GINT_TO_POINTER(maximum_led_brightness));
 
 	status = TRUE;
 
@@ -2814,9 +2821,8 @@ static gboolean init_hybris_patterns(void)
 	init_combination_rules();
 
 	/* Set the LED brightness */
-	execute_datapipe(&led_brightness_pipe,
-			 GINT_TO_POINTER(maximum_led_brightness),
-			 USE_INDATA, CACHE_INDATA);
+	datapipe_exec_full(&led_brightness_pipe,
+			   GINT_TO_POINTER(maximum_led_brightness));
 
 	status = TRUE;
 
@@ -2884,8 +2890,8 @@ static gboolean init_patterns(void)
 /** Flag for: charger connected */
 static charger_state_t charger_state = CHARGER_STATE_UNDEF;
 
-/** Current battery percent level */
-static int battery_level = 0;
+/** Current battery percent level: assume unknown */
+static int battery_level = MCE_BATTERY_LEVEL_UNKNOWN;
 
 /** Setting: sw breathing allowed */
 static gboolean sw_breathing_enabled = MCE_DEFAULT_LED_SW_BREATH_ENABLED;
@@ -3108,16 +3114,16 @@ static datapipe_handler_t mce_led_datapipe_handlers[] =
 {
 	// output triggers
 	{
-		.datapipe  = &user_activity_pipe,
-		.output_cb = user_activity_trigger,
+		.datapipe  = &user_activity_event_pipe,
+		.output_cb = user_activity_event_trigger,
 	},
 	{
 		.datapipe  = &system_state_pipe,
 		.output_cb = system_state_trigger,
 	},
 	{
-		.datapipe  = &display_state_pipe,
-		.output_cb = display_state_trigger,
+		.datapipe  = &display_state_curr_pipe,
+		.output_cb = display_state_curr_trigger,
 	},
 	{
 		.datapipe  = &led_brightness_pipe,
@@ -3156,7 +3162,7 @@ static datapipe_bindings_t mce_led_datapipe_bindings =
 static void
 mce_led_datapipes_init(void)
 {
-	datapipe_bindings_init(&mce_led_datapipe_bindings);
+	mce_datapipe_init_bindings(&mce_led_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes
@@ -3164,7 +3170,7 @@ mce_led_datapipes_init(void)
 static void
 mce_led_datapipes_quit(void)
 {
-	datapipe_bindings_quit(&mce_led_datapipe_bindings);
+	mce_datapipe_quit_bindings(&mce_led_datapipe_bindings);
 }
 
 /**
@@ -3200,8 +3206,8 @@ const gchar *g_module_check_init(GModule *module)
 
 	/* Initialize sw breathing state data */
 	sw_breathing_init();
-	charger_state_trigger(charger_state_pipe.cached_data);
-	battery_level_trigger(battery_level_pipe.cached_data);
+	charger_state_trigger(datapipe_value(&charger_state_pipe));
+	battery_level_trigger(datapipe_value(&battery_level_pipe));
 
 	/* Evaluate initial active pattern state */
 	led_enable();
@@ -3240,9 +3246,9 @@ void g_module_unload(GModule *module)
 	sw_breathing_quit();
 
 	/* Don't disable the LED on shutdown/reboot/acting dead */
-	if ((system_state != MCE_STATE_ACTDEAD) &&
-	    (system_state != MCE_STATE_SHUTDOWN) &&
-	    (system_state != MCE_STATE_REBOOT)) {
+	if ((system_state != MCE_SYSTEM_STATE_ACTDEAD) &&
+	    (system_state != MCE_SYSTEM_STATE_SHUTDOWN) &&
+	    (system_state != MCE_SYSTEM_STATE_REBOOT)) {
 		led_set_active_pattern(0);
 
 		switch (get_led_type()) {

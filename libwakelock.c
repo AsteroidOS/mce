@@ -1,8 +1,23 @@
-/* ------------------------------------------------------------------------- *
- * Copyright (C) 2012 Jolla Ltd.
- * Contact: Simo Piiroinen <simo.piiroinen@jollamobile.com>
- * License: LGPLv2
- * ------------------------------------------------------------------------- */
+/**
+ * @file libwakelock.c
+ * Mode Control Entity - wakelock management
+ * <p>
+ * Copyright (C) 2012-2019 Jolla Ltd.
+ * <p>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ *
+ * mce is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
+ *
+ * mce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 /* NOTE: Only async-signal-safe functions can be called from this
  *       module since we might need to use the functionality while
@@ -164,21 +179,6 @@ static void lwl_write_file(const char *path, const char *data)
 	}
 }
 
-/** Suspend model supported by the kernel */
-typedef enum {
-	/* Not known yet */
-	SUSPEND_TYPE_UNKN  = -1,
-
-	/* Suspend not supported */
-	SUSPEND_TYPE_NONE  =  0,
-
-	/* Early suspend model */
-	SUSPEND_TYPE_EARLY =  1,
-
-	/* Autosleep model */
-	SUSPEND_TYPE_AUTO  =  2,
-} suspend_type_t;
-
 /** Structure for holding static text + size */
 typedef struct
 {
@@ -243,7 +243,7 @@ lwl_write_data(const char *path, const suspend_data_t *data)
 
 /** Helper for checking if/what kind of suspend model is supported
  */
-static suspend_type_t lwl_probe(void)
+suspend_type_t lwl_probe(void)
 {
 	static suspend_type_t suspend_type = SUSPEND_TYPE_UNKN;
 

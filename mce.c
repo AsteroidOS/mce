@@ -24,6 +24,7 @@
  */
 
 #include "mce.h"
+#include "mce-io.h"
 #include "mce-log.h"
 #include "mce-common.h"
 #include "mce-conf.h"
@@ -658,6 +659,7 @@ static struct
 	bool show_module_info;
 	bool systemd_notify;
 	bool valgrind_mode;
+	bool sensortest_mode;
 	int  auto_exit;
 } mce_args =
 {
@@ -668,12 +670,18 @@ static struct
 	.show_module_info = false,
 	.systemd_notify   = false,
 	.valgrind_mode    = false,
+	.sensortest_mode  = false,
 	.auto_exit        = -1,
 };
 
 bool mce_in_valgrind_mode(void)
 {
 	return mce_args.valgrind_mode;
+}
+
+bool mce_in_sensortest_mode(void)
+{
+	return mce_args.sensortest_mode;
 }
 
 static bool mce_do_help(const char *arg);
@@ -709,6 +717,12 @@ static bool mce_do_valgrind_mode(const char *arg)
 {
 	(void)arg;
 	mce_args.valgrind_mode = true;
+	return true;
+}
+static bool mce_do_sensortest_mode(const char *arg)
+{
+	(void)arg;
+	mce_args.sensortest_mode = true;
 	return true;
 }
 static bool mce_do_log_function(const char *arg)
@@ -878,6 +892,25 @@ static const mce_opt_t options[] =
 		.usage       =
 			"Enable run-under valgrind mode\n"
 	},
+	{
+		.name        = "sensortest-mode",
+		.without_arg = mce_do_sensortest_mode,
+		.usage       =
+			"Enable track-all-sensors mode\n"
+			"\n"
+			"Intents to provide a quick way to check whether\n"
+			"sensor adaptation is in a state where all sensors\n"
+			"that are supposedly supported actually report\n"
+			"changes via sensorfwd interfaces.\n"
+			"\n"
+			"This is mainly useful when porting to new devices.\n"
+			"\n"
+			"Suggested usage is to manually execute mce in a way\n"
+			"where it is otherwise quiet, but debug logging for\n"
+			"sensor related activity is enabled, for example:\n"
+			"\n"
+			"   mce --sensortest-mode -Tqqq -lmce-sensorfw.c:*\n"
+	},
 	// sentinel
 	{
 		.name = 0
@@ -1001,19 +1034,19 @@ int main(int argc, char **argv)
 
 	/* Initialise subsystems */
 
-	/* Open fbdev as early as possible */
-	mce_fbdev_init();
-
-	/* Start worker thread */
-	if( !mce_worker_init() )
-		goto EXIT;
-
 	/* Get configuration options */
 	if( !mce_conf_init() ) {
 		mce_log(LL_CRIT,
 			"Failed to initialise configuration options");
 		exit(EXIT_FAILURE);
 	}
+
+	/* Open fbdev as early as possible */
+	mce_fbdev_init();
+
+	/* Start worker thread */
+	if( !mce_worker_init() )
+		goto EXIT;
 
 	/* Initialise D-Bus */
 	if( !mce_dbus_init(mce_args.systembus) ) {
@@ -1109,6 +1142,9 @@ int main(int argc, char **argv)
 		g_idle_add(mce_auto_exit_cb, 0);
 	}
 
+	/* Use timerfd to detect resume from suspend */
+	mce_io_init_resume_timer();
+
 	/* Run the main loop */
 	g_main_loop_run(mainloop);
 
@@ -1116,6 +1152,8 @@ int main(int argc, char **argv)
 	 * either because we requested or because of an error
 	 */
 EXIT:
+	mce_io_quit_resume_timer();
+
 	/* Unload all modules */
 	mce_modules_exit();
 

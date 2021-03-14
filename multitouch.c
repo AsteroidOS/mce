@@ -26,11 +26,8 @@
 
 #include "multitouch.h"
 
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
-#include <inttypes.h>
 
 #include <glib/gstdio.h>
 #include <gio/gio.h>
@@ -134,6 +131,7 @@ void               mt_state_handle_event   (mt_state_t *self, const struct input
 
 bool               mt_state_touching       (const mt_state_t *self);
 
+
 /* ------------------------------------------------------------------------- *
  * LONG PRESS HANDLER
  * ------------------------------------------------------------------------- */
@@ -166,7 +164,7 @@ static gboolean mt_state_long_tap_cb(gpointer data)
     ev->type  = EV_MSC;
     ev->code  = MSC_GESTURE;
     ev->value = GESTURE_DOUBLETAP;
- 
+
     /* Do not generate activity if ts input is grabbed */
     if( !datapipe_get_gint(touch_grab_wanted_pipe) )
         evin_iomon_generate_activity(ev, true, true);
@@ -174,7 +172,7 @@ static gboolean mt_state_long_tap_cb(gpointer data)
     submode_t submode = mce_get_submode_int32();
 
     /* If the event eater is active, don't send anything */
-    if( submode & MCE_EVEATER_SUBMODE )
+    if( submode & MCE_SUBMODE_EVEATER )
         goto EXIT;
 
     /* Gesture events count as actual non-synthetized
@@ -182,8 +180,7 @@ static gboolean mt_state_long_tap_cb(gpointer data)
     evin_iomon_generate_activity(ev, false, true);
 
     /* But otherwise are handled in powerkey.c. */
-    execute_datapipe(&keypress_pipe, &ev,
-                     USE_INDATA, DONT_CACHE_INDATA);
+    datapipe_exec_full(&keypress_event_pipe, &ev);
 
 EXIT:
     return FALSE;
@@ -246,6 +243,8 @@ mt_state_reset(mt_state_t *self)
 /** Update touch position tracking state
  *
  * @param self  Multitouch state object
+ *
+ * @return true if a double tap was just detected, false otherwise
  */
 static void
 mt_state_update(mt_state_t *self)
@@ -271,7 +270,6 @@ mt_state_update(mt_state_t *self)
     if( self->mts_point_count == finger_count )
         return;
 
-    /* When initial touch is detected, trigger a timeout for that sequence */
     if( self->mts_point_count == 0 ) {
         self->current_seq_max_fingers = finger_count;
         self->tap_to_unlock_timer_id =
@@ -279,7 +277,6 @@ mt_state_update(mt_state_t *self)
                     mt_state_long_tap_cb, self);
     }
 
-    /* Maintain maximum number of fingers seen on screen */
     if( self->current_seq_max_fingers < finger_count )
         self->current_seq_max_fingers = finger_count;
 

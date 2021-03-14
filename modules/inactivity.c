@@ -3,9 +3,10 @@
  * Inactivity module -- this implements inactivity logic for MCE
  * <p>
  * Copyright © 2007-2011 Nokia Corporation and/or its subsidiary(-ies).
- * Copyright © 2015      Jolla Ltd.
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
  * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
@@ -21,10 +22,14 @@
  * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "inactivity.h"
+
 #include "../mce.h"
 #include "../mce-log.h"
 #include "../mce-dbus.h"
+#include "../mce-dsme.h"
 #include "../mce-hbtimer.h"
+#include "../mce-setting.h"
 
 #ifdef ENABLE_WAKELOCKS
 # include "../libwakelock.h"
@@ -73,8 +78,6 @@ G_MODULE_EXPORT module_info_struct module_info = {
  * ------------------------------------------------------------------------- */
 
 static const char *mia_inactivity_repr     (bool inactive);
-static void        mia_generate_activity   (void);
-static void        mia_generate_inactivity (void);
 
 /* ------------------------------------------------------------------------- *
  * DBUS_ACTION
@@ -105,16 +108,20 @@ static void          mia_action_delete (mia_action_t *self);
  * DATAPIPE_TRACKING
  * ------------------------------------------------------------------------- */
 
-static void     mia_datapipe_inactive_request_cb     (gconstpointer data);
+static bool     mia_activity_allowed                 (void);
+static void     mia_datapipe_inactivity_event_cb     (gconstpointer data);
 static void     mia_datapipe_device_inactive_cb      (gconstpointer data);
-static void     mia_datapipe_proximity_sensor_cb     (gconstpointer data);
-static void     mia_datapipe_inactivity_timeout_cb   (gconstpointer data);
+static void     mia_datapipe_proximity_sensor_actual_cb(gconstpointer data);
+static void     mia_datapipe_inactivity_delay_cb     (gconstpointer data);
 static void     mia_datapipe_submode_cb              (gconstpointer data);
 static void     mia_datapipe_alarm_ui_state_cb       (gconstpointer data);
 static void     mia_datapipe_call_state_cb           (gconstpointer data);
 static void     mia_datapipe_system_state_cb         (gconstpointer data);
 static void     mia_datapipe_display_state_next_cb   (gconstpointer data);
 static void     mia_datapipe_interaction_expected_cb (gconstpointer data);
+static void     mia_datapipe_charger_state_cb        (gconstpointer data);
+static void     mia_datapipe_init_done_cb            (gconstpointer data);
+static void     mia_datapipe_osupdate_running_cb     (gconstpointer data);
 
 static void     mia_datapipe_check_initial_state     (void);
 
@@ -167,6 +174,27 @@ static void     mia_timer_init  (void);
 static void     mia_timer_quit  (void);
 
 /* ------------------------------------------------------------------------- *
+ * SHUTDOWN_TIMER
+ * ------------------------------------------------------------------------- */
+
+static gboolean mia_shutdown_timer_cb       (gpointer aptr);
+static void     mia_shutdown_timer_stop     (void);
+static void     mia_shutdown_timer_start    (void);
+static bool     mia_shutdown_timer_wanted   (void);
+static void     mia_shutdown_timer_rethink  (void);
+static void     mia_shutdown_timer_restart  (void);
+static void     mia_shutdown_timer_init     (void);
+static void     mia_shutdown_timer_quit     (void);
+
+/* ------------------------------------------------------------------------- *
+ * SETTING_TRACKING
+ * ------------------------------------------------------------------------- */
+
+static void     mia_setting_changed_cb      (GConfClient *gcc, guint id, GConfEntry *entry, gpointer data);
+static void     mia_setting_init            (void);
+static void     mia_setting_quit            (void);
+
+/* ------------------------------------------------------------------------- *
  * MODULE_LOAD_UNLOAD
  * ------------------------------------------------------------------------- */
 
@@ -186,6 +214,12 @@ static GSList *activity_action_owners = NULL;
 /** Heartbeat timer for inactivity timeout */
 static mce_hbtimer_t *inactivity_timer_hnd = 0;
 
+/** Heartbeat timer for idle shutdown */
+static mce_hbtimer_t *shutdown_timer_hnd = 0;
+
+/** Flag for: Idle shutdown already triggered */
+static bool shutdown_timer_triggered = false;
+
 /** Cached device inactivity state
  *
  * Default to inactive. Initial state is evaluated and broadcast over
@@ -194,7 +228,7 @@ static mce_hbtimer_t *inactivity_timer_hnd = 0;
 static gboolean device_inactive = TRUE;
 
 /* Cached submode bitmask; assume in transition at startup */
-static submode_t submode = MCE_TRANSITION_SUBMODE;
+static submode_t submode = MCE_SUBMODE_TRANSITION;
 
 /** Cached alarm ui state */
 static alarm_ui_state_t alarm_ui_state = MCE_ALARM_UI_INVALID_INT32;
@@ -203,19 +237,32 @@ static alarm_ui_state_t alarm_ui_state = MCE_ALARM_UI_INVALID_INT32;
 static call_state_t call_state = CALL_STATE_INVALID;
 
 /* Cached system state */
-static system_state_t system_state = MCE_STATE_UNDEF;
+static system_state_t system_state = MCE_SYSTEM_STATE_UNDEF;
 
 /** Cached display state */
 static display_state_t display_state_next = MCE_DISPLAY_UNDEF;
 
 /** Cached inactivity timeout delay [s] */
-static gint inactivity_timeout = DEFAULT_INACTIVITY_TIMEOUT;
+static gint device_inactive_delay = DEFAULT_INACTIVITY_DELAY;
 
 /** Cached proximity sensor state */
-static cover_state_t proximity_state = COVER_UNDEF;
+static cover_state_t proximity_sensor_actual = COVER_UNDEF;
 
 /** Cached Interaction expected state */
 static bool interaction_expected = false;
+
+/** Cached charger state; assume unknown */
+static charger_state_t charger_state = CHARGER_STATE_UNDEF;
+
+/** Cached init_done state; assume unknown */
+static tristate_t init_done = TRISTATE_UNKNOWN;
+
+/** Update mode is active; assume false */
+static bool osupdate_running = false;
+
+/** Setting for automatick shutdown delay after inactivity */
+static gint    mia_shutdown_delay = MCE_DEFAULT_INACTIVITY_SHUTDOWN_DELAY;
+static guint   mia_shutdown_delay_setting_id = 0;
 
 /* ========================================================================= *
  * HELPER_FUNCTIONS
@@ -226,22 +273,6 @@ static bool interaction_expected = false;
 static const char *mia_inactivity_repr(bool inactive)
 {
     return inactive ? "inactive" : "active";
-}
-
-/** Helper for attempting to switch to active state
- */
-static void mia_generate_activity(void)
-{
-    execute_datapipe(&device_inactive_event_pipe, GINT_TO_POINTER(FALSE),
-                     USE_INDATA, CACHE_OUTDATA);
-}
-
-/** Helper for switching to inactive state
- */
-static void mia_generate_inactivity(void)
-{
-    execute_datapipe(&device_inactive_event_pipe, GINT_TO_POINTER(TRUE),
-                     USE_INDATA, CACHE_OUTDATA);
 }
 
 /* ========================================================================= *
@@ -317,13 +348,13 @@ static bool mia_activity_allowed(void)
 
     /* Activity applies only when display is on */
     if( display_state_next != MCE_DISPLAY_ON ) {
-        mce_log(LL_DEBUG, "display_state = %s; ignoring activity",
+        mce_log(LL_DEBUG, "display_state_curr = %s; ignoring activity",
                 display_state_repr(display_state_next));
         goto DENY;
     }
 
     /* Activity applies only to USER mode */
-    if( system_state != MCE_STATE_USER ) {
+    if( system_state != MCE_SYSTEM_STATE_USER ) {
         mce_log(LL_DEBUG, "system_state = %s; ignoring activity",
                 system_state_repr(system_state));
         goto DENY;
@@ -334,7 +365,7 @@ static bool mia_activity_allowed(void)
      * This allows the lockscreen to be longer visible,
      * because the blanking timer can be cancelled.
      */
-    if( submode & MCE_TKLOCK_SUBMODE )
+    if( submode & MCE_SUBMODE_TKLOCK )
         goto ALLOW;
 
 ALLOW:
@@ -350,7 +381,7 @@ DENY:
  *             TRUE if the device is inactive,
  *             FALSE if the device is active
  */
-static void mia_datapipe_inactive_request_cb(gconstpointer data)
+static void mia_datapipe_inactivity_event_cb(gconstpointer data)
 {
     gboolean inactive = GPOINTER_TO_INT(data);
 
@@ -368,9 +399,8 @@ static void mia_datapipe_inactive_request_cb(gconstpointer data)
             goto EXIT;
     }
 
-    execute_datapipe(&device_inactive_state_pipe,
-                     GINT_TO_POINTER(inactive),
-                     USE_INDATA, CACHE_OUTDATA);
+    datapipe_exec_full(&device_inactive_pipe,
+                       GINT_TO_POINTER(inactive));
 EXIT:
     return;
 }
@@ -397,6 +427,8 @@ static void mia_datapipe_device_inactive_cb(gconstpointer data)
         /* React to activity */
         if( !device_inactive )
             mia_activity_action_execute_all();
+
+        mia_shutdown_timer_rethink();
     }
 
     /* Restart/stop timer */
@@ -407,25 +439,25 @@ static void mia_datapipe_device_inactive_cb(gconstpointer data)
  *
  * @param data proximity sensor state as void pointer
  */
-static void mia_datapipe_proximity_sensor_cb(gconstpointer data)
+static void mia_datapipe_proximity_sensor_actual_cb(gconstpointer data)
 {
-    cover_state_t prev = proximity_state;
-    proximity_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = proximity_sensor_actual;
+    proximity_sensor_actual = GPOINTER_TO_INT(data);
 
-    if( proximity_state == prev )
+    if( proximity_sensor_actual == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "proximity_state: %s -> %s",
+    mce_log(LL_DEBUG, "proximity_sensor_actual: %s -> %s",
             proximity_state_repr(prev),
-            proximity_state_repr(proximity_state));
+            proximity_state_repr(proximity_sensor_actual));
 
     /* generate activity if proximity sensor is
      * uncovered and there is a incoming call */
 
-    if( proximity_state == COVER_OPEN &&
+    if( proximity_sensor_actual == COVER_OPEN &&
         call_state == CALL_STATE_RINGING ) {
         mce_log(LL_INFO, "proximity -> uncovered, call = ringing");
-        mia_generate_activity();
+        mce_datapipe_generate_activity();
     }
 
 EXIT:
@@ -436,20 +468,20 @@ EXIT:
  *
  * @param data inactivity timeout (as void pointer)
  */
-static void mia_datapipe_inactivity_timeout_cb(gconstpointer data)
+static void mia_datapipe_inactivity_delay_cb(gconstpointer data)
 {
-    gint prev = inactivity_timeout;
-    inactivity_timeout = GPOINTER_TO_INT(data);
+    gint prev = device_inactive_delay;
+    device_inactive_delay = GPOINTER_TO_INT(data);
 
     /* Sanitise timeout */
-    if( inactivity_timeout <= 0 )
-        inactivity_timeout = 30;
+    if( device_inactive_delay <= 0 )
+        device_inactive_delay = 30;
 
-    if( inactivity_timeout == prev )
+    if( device_inactive_delay == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "inactivity_timeout: %d -> %d",
-            prev, inactivity_timeout);
+    mce_log(LL_DEBUG, "device_inactive_delay: %d -> %d",
+            prev, device_inactive_delay);
 
     /* Reprogram timer */
     mia_timer_start();
@@ -470,7 +502,8 @@ static void mia_datapipe_submode_cb(gconstpointer data)
     if( submode == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "submode = %d", submode);
+    mce_log(LL_DEBUG, "submode = %s",
+            submode_change_repr(prev, submode));
 
 EXIT:
     return;
@@ -531,8 +564,10 @@ static void mia_datapipe_system_state_cb(gconstpointer data)
             system_state_repr(prev),
             system_state_repr(system_state));
 
-    if( prev == MCE_STATE_UNDEF )
+    if( prev == MCE_SYSTEM_STATE_UNDEF )
         mia_datapipe_check_initial_state();
+
+    mia_shutdown_timer_rethink();
 
 EXIT:
     return;
@@ -577,11 +612,69 @@ static void mia_datapipe_interaction_expected_cb(gconstpointer data)
     /* Generate activity to restart blanking timers if interaction
      * becomes expected while lockscreen is active. */
     if( interaction_expected &&
-        (submode & MCE_TKLOCK_SUBMODE) &&
+        (submode & MCE_SUBMODE_TKLOCK) &&
         display_state_next == MCE_DISPLAY_ON ) {
         mce_log(LL_DEBUG, "interaction expected; generate activity");
-        mia_generate_activity();
+        mce_datapipe_generate_activity();
     }
+
+EXIT:
+    return;
+}
+
+/** Change notifications for charger_state
+ */
+static void mia_datapipe_charger_state_cb(gconstpointer data)
+{
+    charger_state_t prev = charger_state;
+    charger_state = GPOINTER_TO_INT(data);
+
+    if( charger_state == prev )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "charger_state = %s -> %s",
+            charger_state_repr(prev),
+            charger_state_repr(charger_state));
+
+    mia_shutdown_timer_rethink();
+
+EXIT:
+    return;
+}
+
+/** Change notifications for init_done
+ */
+static void mia_datapipe_init_done_cb(gconstpointer data)
+{
+    tristate_t prev = init_done;
+    init_done = GPOINTER_TO_INT(data);
+
+    if( init_done == prev )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "init_done = %s -> %s",
+            tristate_repr(prev),
+            tristate_repr(init_done));
+
+    mia_shutdown_timer_rethink();
+
+EXIT:
+    return;
+}
+
+/** Change notifications for osupdate_running
+ */
+static void mia_datapipe_osupdate_running_cb(gconstpointer data)
+{
+    bool prev = osupdate_running;
+    osupdate_running = GPOINTER_TO_INT(data);
+
+    if( osupdate_running == prev )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "osupdate_running = %d -> %d", prev, osupdate_running);
+
+    mia_shutdown_timer_rethink();
 
 EXIT:
     return;
@@ -601,7 +694,7 @@ static void mia_datapipe_check_initial_state(void)
      * mce startup are done and the device state
      * is sufficiently known */
 
-    if( system_state == MCE_STATE_UNDEF )
+    if( system_state == MCE_SYSTEM_STATE_UNDEF )
         goto EXIT;
 
     if( display_state_next == MCE_DISPLAY_UNDEF )
@@ -623,7 +716,7 @@ static void mia_datapipe_check_initial_state(void)
      */
 
     mce_log(LL_DEBUG, "device state known");
-    mia_generate_activity();
+    mce_datapipe_generate_activity();
 
     /* Make sure the current state gets broadcast even
      * if the artificial activity gets suppressed. */
@@ -640,20 +733,20 @@ static datapipe_handler_t mia_datapipe_handlers[] =
 {
     // output triggers
     {
-        .datapipe  = &device_inactive_event_pipe,
-        .output_cb = mia_datapipe_inactive_request_cb,
+        .datapipe  = &inactivity_event_pipe,
+        .output_cb = mia_datapipe_inactivity_event_cb,
     },
     {
-        .datapipe  = &device_inactive_state_pipe,
+        .datapipe  = &device_inactive_pipe,
         .output_cb = mia_datapipe_device_inactive_cb,
     },
     {
-        .datapipe  = &proximity_sensor_pipe,
-        .output_cb = mia_datapipe_proximity_sensor_cb,
+        .datapipe  = &proximity_sensor_actual_pipe,
+        .output_cb = mia_datapipe_proximity_sensor_actual_cb,
     },
     {
-        .datapipe  = &inactivity_timeout_pipe,
-        .output_cb = mia_datapipe_inactivity_timeout_cb,
+        .datapipe  = &inactivity_delay_pipe,
+        .output_cb = mia_datapipe_inactivity_delay_cb,
     },
     {
         .datapipe  = &submode_pipe,
@@ -679,6 +772,18 @@ static datapipe_handler_t mia_datapipe_handlers[] =
         .datapipe  = &interaction_expected_pipe,
         .output_cb = mia_datapipe_interaction_expected_cb,
     },
+    {
+        .datapipe  = &charger_state_pipe,
+        .output_cb = mia_datapipe_charger_state_cb,
+    },
+    {
+        .datapipe  = &init_done_pipe,
+        .output_cb = mia_datapipe_init_done_cb,
+    },
+    {
+        .datapipe  = &osupdate_running_pipe,
+        .output_cb = mia_datapipe_osupdate_running_cb,
+    },
     // sentinel
     {
         .datapipe = 0,
@@ -695,13 +800,13 @@ static datapipe_bindings_t mia_datapipe_bindings =
  */
 static void mia_datapipe_init(void)
 {
-    datapipe_bindings_init(&mia_datapipe_bindings);
+    mce_datapipe_init_bindings(&mia_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes */
 static void mia_datapipe_quit(void)
 {
-    datapipe_bindings_quit(&mia_datapipe_bindings);
+    mce_datapipe_quit_bindings(&mia_datapipe_bindings);
 }
 
 /* ========================================================================= *
@@ -1142,7 +1247,7 @@ static gboolean mia_timer_cb(gpointer data)
 
     mce_log(LL_DEBUG, "inactivity timeout triggered");
 
-    mia_generate_inactivity();
+    mce_datapipe_generate_inactivity();
 
     return FALSE;
 }
@@ -1156,8 +1261,9 @@ static void mia_timer_start(void)
     if( device_inactive )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "inactivity timeout in %d seconds", inactivity_timeout);
-    mce_hbtimer_set_period(inactivity_timer_hnd, inactivity_timeout * 1000);
+    mce_log(LL_DEBUG, "inactivity timeout in %d seconds",
+            device_inactive_delay);
+    mce_hbtimer_set_period(inactivity_timer_hnd, device_inactive_delay * 1000);
     mce_hbtimer_start(inactivity_timer_hnd);
 
 EXIT:
@@ -1180,7 +1286,7 @@ static void
 mia_timer_init(void)
 {
     inactivity_timer_hnd = mce_hbtimer_create("inactivity-timer",
-                                               inactivity_timeout * 1000,
+                                               device_inactive_delay * 1000,
                                                mia_timer_cb, 0);
 }
 
@@ -1191,6 +1297,208 @@ mia_timer_quit(void)
 {
     mce_hbtimer_delete(inactivity_timer_hnd),
         inactivity_timer_hnd = 0;
+}
+
+/* ========================================================================= *
+ * SHUTDOWN_TIMER
+ * ========================================================================= */
+
+/** Timer callback for starting inactivity shutdown
+ *
+ * @param aptr  (unused) User data pointer
+ *
+ * @return TRUE to restart timer, or FALSE to stop it
+ */
+static gboolean
+mia_shutdown_timer_cb(gpointer aptr)
+{
+    (void)aptr;
+
+    mce_log(LL_WARN, "shutdown timer triggered");
+
+    shutdown_timer_triggered = true;
+    mce_dsme_request_normal_shutdown();
+
+    return FALSE;
+}
+
+/** Cancel inactivity shutdown timeout
+ */
+static void
+mia_shutdown_timer_stop(void)
+{
+    if( !mce_hbtimer_is_active(shutdown_timer_hnd) )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "shutdown timer stopped");
+    mce_hbtimer_stop(shutdown_timer_hnd);
+
+EXIT:
+    shutdown_timer_triggered = false;
+    return;
+}
+
+/** Schedule inactivity shutdown timeout
+ */
+static void
+mia_shutdown_timer_start(void)
+{
+    if( mce_hbtimer_is_active(shutdown_timer_hnd) )
+        goto EXIT;
+
+    if( shutdown_timer_triggered ) {
+        mce_log(LL_DEBUG, "shutdown timer already triggered");
+        goto EXIT;
+    }
+
+    if( mia_shutdown_delay < MCE_MINIMUM_INACTIVITY_SHUTDOWN_DELAY ) {
+        mce_log(LL_DEBUG, "shutdown timer is disabled in config");
+        goto EXIT;
+    }
+
+    mce_log(LL_DEBUG, "shutdown timer started (trigger in %d seconds)",
+            mia_shutdown_delay);
+    mce_hbtimer_set_period(shutdown_timer_hnd,
+                           mia_shutdown_delay * 1000);
+    mce_hbtimer_start(shutdown_timer_hnd);
+
+EXIT:
+    return;
+}
+
+/** Evaluate if conditions for inactivity shutdown has been met
+ *
+ * @return true if delayed shutdown should be started, false otherwise
+ */
+static bool
+mia_shutdown_timer_wanted(void)
+{
+    bool want_timer = false;
+
+    if( !device_inactive )
+        goto EXIT;
+
+    if( charger_state != CHARGER_STATE_OFF )
+        goto EXIT;
+
+    if( osupdate_running )
+        goto EXIT;
+
+    if( init_done != TRISTATE_TRUE )
+        goto EXIT;
+
+    if( system_state != MCE_SYSTEM_STATE_USER )
+        goto EXIT;
+
+    want_timer = true;
+
+EXIT:
+    return want_timer;
+}
+
+/** Schedule/cancel inactivity shutdown based on device state
+ */
+static void
+mia_shutdown_timer_rethink(void)
+{
+    if( mia_shutdown_timer_wanted() )
+        mia_shutdown_timer_start();
+    else
+        mia_shutdown_timer_stop();
+}
+
+/** Reschedule inactivity shutdown after settings changes
+ */
+static void
+mia_shutdown_timer_restart(void)
+{
+    if( !shutdown_timer_triggered ) {
+        mia_shutdown_timer_stop();
+        mia_shutdown_timer_rethink();
+    }
+}
+
+/** Initialize inactivity shutdown triggering
+ */
+static void
+mia_shutdown_timer_init(void)
+{
+    shutdown_timer_hnd =
+        mce_hbtimer_create("idle_shutdown",
+                           mia_shutdown_delay * 1000,
+                           mia_shutdown_timer_cb,
+                           0);
+}
+
+/** Cleanup inactivity shutdown triggering
+ */
+static void
+mia_shutdown_timer_quit(void)
+{
+    mce_hbtimer_delete(shutdown_timer_hnd),
+        shutdown_timer_hnd = 0;
+}
+
+/* ========================================================================= *
+ * SETTING_TRACKING
+ * ========================================================================= */
+
+/** Handle setting value changed notifications
+ *
+ * @param gcc   (unused) gconf client object
+ * @param id    ID from gconf_client_notify_add()
+ * @param entry The modified GConf entry
+ * @param aptr  (unused) User data pointer
+ */
+static void
+mia_setting_changed_cb(GConfClient *gcc, guint id,
+                       GConfEntry *entry, gpointer aptr)
+{
+    (void)gcc;
+    (void)aptr;
+
+    const GConfValue *gcv = gconf_entry_get_value(entry);
+
+    if( !gcv ) {
+        mce_log(LL_DEBUG, "GConf Key `%s' has been unset",
+                gconf_entry_get_key(entry));
+        goto EXIT;
+    }
+
+    if( id == mia_shutdown_delay_setting_id ) {
+        gint prev = mia_shutdown_delay;
+        mia_shutdown_delay = gconf_value_get_int(gcv);
+        mce_log(LL_NOTICE, "mia_shutdown_delay: %d -> %d",
+                prev, mia_shutdown_delay);
+        mia_shutdown_timer_restart();
+    }
+    else {
+        mce_log(LL_WARN, "Spurious GConf value received; confused!");
+    }
+
+EXIT:
+    return;
+}
+
+/** Get intial setting values and start tracking changes
+ */
+static void
+mia_setting_init(void)
+{
+    mce_setting_track_int(MCE_SETTING_INACTIVITY_SHUTDOWN_DELAY,
+                          &mia_shutdown_delay,
+                          MCE_DEFAULT_INACTIVITY_SHUTDOWN_DELAY,
+                          mia_setting_changed_cb,
+                          &mia_shutdown_delay_setting_id);
+}
+
+/** Stop tracking setting changes
+ */
+static void
+mia_setting_quit(void)
+{
+    mce_setting_notifier_remove(mia_shutdown_delay_setting_id),
+        mia_shutdown_delay_setting_id = 0;
 }
 
 /* ========================================================================= *
@@ -1207,7 +1515,10 @@ const gchar *g_module_check_init(GModule *module)
 {
     (void)module;
 
+    mia_setting_init();
+
     mia_timer_init();
+    mia_shutdown_timer_init();
 
     /* Append triggers/filters to datapipes */
     mia_datapipe_init();
@@ -1234,6 +1545,8 @@ void g_module_unload(GModule *module)
 {
     (void)module;
 
+    mia_setting_quit();
+
     /* Remove dbus handlers */
     mia_dbus_quit();
 
@@ -1242,6 +1555,7 @@ void g_module_unload(GModule *module)
 
     /* Do not leave any timers active */
     mia_timer_quit();
+    mia_shutdown_timer_quit();
 
 #ifdef ENABLE_WAKELOCKS
     mia_keepalive_stop();

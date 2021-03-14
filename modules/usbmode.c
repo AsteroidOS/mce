@@ -28,6 +28,9 @@
 
 #include <gmodule.h>
 
+#include <usb_moded-dbus.h>
+#include <usb_moded-modes.h>
+
 /* ========================================================================= *
  * CABLE_STATE
  * ========================================================================= */
@@ -56,7 +59,7 @@ static void     usbmode_dbus_quit            (void);
  * DATAPIPE_HANDLERS
  * ========================================================================= */
 
-static void usbmode_datapipe_usbmoded_available_cb (gconstpointer data);
+static void usbmode_datapipe_usbmoded_service_state_cb (gconstpointer data);
 
 static void usbmode_datapipe_init                  (void);
 static void usbmode_datapipe_quit                  (void);
@@ -88,22 +91,40 @@ static const struct
     usb_cable_state_t  state;
 } mode_lut[] =
 {
-    { "undefined",                  USB_CABLE_DISCONNECTED },
-    { "USB disconnected",           USB_CABLE_DISCONNECTED },
-    { "charger_disconnected",       USB_CABLE_DISCONNECTED },
+    /* No cable attached */
+    { MODE_UNDEFINED,             USB_CABLE_DISCONNECTED },
 
-    { "mass_storage",               USB_CABLE_CONNECTED    },
-    { "data_in_use",                USB_CABLE_CONNECTED    },
-    { "mtp_mode",                   USB_CABLE_CONNECTED    },
-    { "pc_suite",                   USB_CABLE_CONNECTED    },
-    { "USB connected",              USB_CABLE_CONNECTED    },
-    { "charger_connected",          USB_CABLE_CONNECTED    },
-    { "developer_mode",             USB_CABLE_CONNECTED    },
-    { "charging_only",              USB_CABLE_CONNECTED    },
-    { "dedicated_charger",          USB_CABLE_CONNECTED    },
+    /* Attach / detach dedicated charger */
+    { CHARGER_CONNECTED,          USB_CABLE_CONNECTED    },
+    { MODE_CHARGER,               USB_CABLE_CONNECTED    },
+    { CHARGER_DISCONNECTED,       USB_CABLE_DISCONNECTED },
 
-    { "mode_requested_show_dialog", USB_CABLE_ASK_USER     },
-    { "ask",                        USB_CABLE_ASK_USER     },
+    /* Attach / detach pc cable */
+    { USB_CONNECTED,              USB_CABLE_CONNECTED    },
+    { MODE_CHARGING_FALLBACK,     USB_CABLE_CONNECTED    },
+    { USB_CONNECTED_DIALOG_SHOW,  USB_CABLE_ASK_USER     },
+    { MODE_ASK,                   USB_CABLE_ASK_USER     },
+    { MODE_MASS_STORAGE,          USB_CABLE_CONNECTED    },
+    { MODE_MTP,                   USB_CABLE_CONNECTED    },
+    { MODE_PC_SUITE,              USB_CABLE_CONNECTED    },
+    { MODE_DEVELOPER,             USB_CABLE_CONNECTED    },
+    { MODE_CHARGING,              USB_CABLE_CONNECTED    },
+    { MODE_HOST,                  USB_CABLE_CONNECTED    },
+    { MODE_CONNECTION_SHARING,    USB_CABLE_CONNECTED    },
+    { MODE_DIAG,                  USB_CABLE_CONNECTED    },
+    { MODE_ADB,                   USB_CABLE_CONNECTED    },
+    { USB_DISCONNECTED,           USB_CABLE_DISCONNECTED },
+
+    /* Busy can occur both on connect / after disconnect */
+    { MODE_BUSY,                  USB_CABLE_UNDEF        },
+
+    /* Events ignored while evaluating cable state */
+    { DATA_IN_USE,                USB_CABLE_UNDEF        },
+    { USB_REALLY_DISCONNECT,      USB_CABLE_UNDEF        },
+    { USB_PRE_UNMOUNT,            USB_CABLE_UNDEF        },
+    { RE_MOUNT_FAILED,            USB_CABLE_UNDEF        },
+    { MODE_SETTING_FAILED,        USB_CABLE_UNDEF        },
+    { UMOUNT_ERROR,               USB_CABLE_UNDEF        },
 };
 
 /** Map reported usb mode to usb_cable_state_t used within mce
@@ -142,7 +163,7 @@ cleanup:
     return state;
 }
 
-/** Update usb_cable_pipe according tomatch  USB mode reported by usb_moded
+/** Update usb_cable_state_pipe according tomatch  USB mode reported by usb_moded
  *
  * @param mode Name of USB mode as reported by usb_moded
  */
@@ -151,8 +172,11 @@ usbmode_cable_state_update(const char *mode)
 {
     mce_log(LL_NOTICE, "usb mode: %s", mode);
 
-    usb_cable_state_t prev = datapipe_get_gint(usb_cable_pipe);
+    usb_cable_state_t prev = datapipe_get_gint(usb_cable_state_pipe);
     usb_cable_state_t curr = usbmode_cable_state_lookup(mode);
+
+    if( curr == USB_CABLE_UNDEF )
+        goto EXIT;
 
     if( prev == curr )
         goto EXIT;
@@ -161,8 +185,7 @@ usbmode_cable_state_update(const char *mode)
             usb_cable_state_repr(prev),
             usb_cable_state_repr(curr));
 
-    execute_datapipe(&usb_cable_pipe, GINT_TO_POINTER(curr),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&usb_cable_state_pipe, GINT_TO_POINTER(curr));
 EXIT:
     return;
 }
@@ -307,27 +330,27 @@ static void usbmode_dbus_quit(void)
  * DATAPIPE_HANDLERS
  * ========================================================================= */
 
-static service_state_t usbmoded_available = SERVICE_STATE_UNDEF;
+static service_state_t usbmoded_service_state = SERVICE_STATE_UNDEF;
 
-/** Handle display_state_req_pipe notifications
+/** Handle display_state_request_pipe notifications
  *
  * This is where display state transition starts
  *
  * @param data Requested display_state_t (as void pointer)
  */
-static void usbmode_datapipe_usbmoded_available_cb(gconstpointer data)
+static void usbmode_datapipe_usbmoded_service_state_cb(gconstpointer data)
 {
-    service_state_t prev = usbmoded_available;
-    usbmoded_available = GPOINTER_TO_INT(data);
+    service_state_t prev = usbmoded_service_state;
+    usbmoded_service_state = GPOINTER_TO_INT(data);
 
-    if( usbmoded_available == prev )
+    if( usbmoded_service_state == prev )
         goto EXIT;
 
-    mce_log(LL_NOTICE, "usbmoded_available = %s -> %s",
+    mce_log(LL_NOTICE, "usbmoded_service_state = %s -> %s",
             service_state_repr(prev),
-            service_state_repr(usbmoded_available));
+            service_state_repr(usbmoded_service_state));
 
-    if( usbmoded_available == SERVICE_STATE_RUNNING )
+    if( usbmoded_service_state == SERVICE_STATE_RUNNING )
         usbmode_dbus_query_start();
     else
         usbmode_dbus_query_cancel();
@@ -341,8 +364,8 @@ static datapipe_handler_t usbmode_datapipe_handlers[] =
 {
     // output triggers
     {
-        .datapipe  = &usbmoded_available_pipe,
-        .output_cb = usbmode_datapipe_usbmoded_available_cb,
+        .datapipe  = &usbmoded_service_state_pipe,
+        .output_cb = usbmode_datapipe_usbmoded_service_state_cb,
     },
 
     // sentinel
@@ -362,14 +385,14 @@ static datapipe_bindings_t usbmode_datapipe_bindings =
 static void usbmode_datapipe_init(void)
 {
     // triggers
-    datapipe_bindings_init(&usbmode_datapipe_bindings);
+    mce_datapipe_init_bindings(&usbmode_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes */
 static void usbmode_datapipe_quit(void)
 {
     // triggers
-    datapipe_bindings_quit(&usbmode_datapipe_bindings);
+    mce_datapipe_quit_bindings(&usbmode_datapipe_bindings);
 }
 
 /* ========================================================================= *

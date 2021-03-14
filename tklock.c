@@ -4,9 +4,19 @@
  * of the Mode Control Entity
  * <p>
  * Copyright © 2004-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2012-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Tapio Rantala <ext-tapio.rantala@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Jukka Turunen <ext-jukka.t.turunen@nokia.com>
+ * @author Irina Bezruk <ext-irina.bezruk@nokia.com>
+ * @author Kalle Jokiniemi <kalle.jokiniemi@jolla.com>
+ * @author Mika Laitio <lamikr@pilppa.org>
+ * @author Markus Lehtonen <markus.lehtonen@iki.fi>
  * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ * @author Vesa Halttunen <vesa.halttunen@jollamobile.com>
+ * @author Andrew den Exter <andrew.den.exter@jolla.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -23,11 +33,10 @@
 
 #include "tklock.h"
 
-#include "mce.h"
+#include "mce-common.h"
 #include "mce-log.h"
 #include "mce-lib.h"
 #include "mce-io.h"
-#include "mce-conf.h"
 #include "mce-setting.h"
 #include "mce-dbus.h"
 #include "mce-hbtimer.h"
@@ -44,9 +53,6 @@
 #include "systemui/tklock-dbus-names.h"
 
 #include <linux/input.h>
-
-#include <sys/types.h>
-#include <sys/stat.h>
 
 #include <unistd.h>
 #include <string.h>
@@ -76,6 +82,8 @@ typedef enum
 /* ========================================================================= *
  * CONSTANTS
  * ========================================================================= */
+
+#define MODULE_NAME "tklock"
 
 /** Max valid time_t value in milliseconds */
 #define MAX_TICK (INT_MAX * (int64_t)1000)
@@ -174,45 +182,57 @@ typedef enum
 // datapipe values and triggers
 
 static void     tklock_datapipe_system_state_cb(gconstpointer data);
-static void     tklock_datapipe_device_lock_state_cb(gconstpointer data);
-static void     tklock_datapipe_device_resumed_cb(gconstpointer data);
-static void     tklock_datapipe_lipstick_available_cb(gconstpointer data);
-static void     tklock_datapipe_update_mode_cb(gconstpointer data);
+static void     tklock_datapipe_devicelock_state_cb(gconstpointer data);
+static void     tklock_datapipe_devicelock_state_cb2(gpointer aptr);
+static void     tklock_datapipe_resume_detected_event_cb(gconstpointer data);
+static void     tklock_datapipe_devicelock_service_state_cb(gconstpointer data);
+static void     tklock_datapipe_lipstick_service_state_cb(gconstpointer data);
+static void     tklock_datapipe_osupdate_running_cb(gconstpointer data);
 static void     tklock_datapipe_shutting_down_cb(gconstpointer data);
-static void     tklock_datapipe_display_state_cb(gconstpointer data);
+static void     tklock_datapipe_display_state_curr_cb(gconstpointer data);
+static void     tklock_datapipe_display_state_next_cb(gconstpointer data);
+static void     tklock_datapipe_proximity_eval_led(void);
 static void     tklock_datapipe_proximity_update(void);
 static gboolean tklock_datapipe_proximity_uncover_cb(gpointer data);
 static void     tklock_datapipe_proximity_uncover_cancel(void);
 static void     tklock_datapipe_proximity_uncover_schedule(void);
-static void     tklock_datapipe_proximity_sensor_cb(gconstpointer data);
+static void     tklock_datapipe_proximity_sensor_actual_cb(gconstpointer data);
 static void     tklock_datapipe_call_state_cb(gconstpointer data);
+static void     tklock_datapipe_music_playback_ongoing_cb(gconstpointer data);
 static void     tklock_datapipe_alarm_ui_state_cb(gconstpointer data);
 static void     tklock_datapipe_charger_state_cb(gconstpointer data);
 static void     tklock_datapipe_battery_status_cb(gconstpointer data);
-static void     tklock_datapipe_usb_cable_cb(gconstpointer data);
-static void     tklock_datapipe_jack_sense_cb(gconstpointer data);
-static void     tklock_datapipe_camera_button_cb(gconstpointer const data);
-static void     tklock_datapipe_keypress_cb(gconstpointer const data);
-static void     tklock_datapipe_exception_state_cb(gconstpointer data);
+static void     tklock_datapipe_usb_cable_state_cb(gconstpointer data);
+static void     tklock_datapipe_jack_sense_state_cb(gconstpointer data);
+static void     tklock_datapipe_camera_button_state_cb(gconstpointer const data);
+static void     tklock_datapipe_keypress_event_cb(gconstpointer const data);
+static void     tklock_datapipe_uiexception_type_cb(gconstpointer data);
 static void     tklock_datapipe_audio_route_cb(gconstpointer data);
-static void     tklock_datapipe_tk_lock_cb(gconstpointer data);
+static void     tklock_datapipe_tklock_request_cb(gconstpointer data);
 static void     tklock_datapipe_interaction_expected_cb(gconstpointer data);
+static gpointer tklock_datapipe_submode_filter_cb(gpointer data);
 static void     tklock_datapipe_submode_cb(gconstpointer data);
-static void     tklock_datapipe_lockkey_cb(gconstpointer const data);
-static void     tklock_datapipe_heartbeat_cb(gconstpointer data);
-static void     tklock_datapipe_keyboard_slide_input_cb(gconstpointer const data);
-static void     tklock_datapipe_keyboard_slide_output_cb(gconstpointer const data);
-static void     tklock_datapipe_keyboard_available_cb(gconstpointer const data);
-static void     tklock_datapipe_ambient_light_poll_cb(gconstpointer const data);
-static void     tklock_datapipe_ambient_light_sensor_cb(gconstpointer data);
+static void     tklock_datapipe_lockkey_state_cb(gconstpointer const data);
+static void     tklock_datapipe_heartbeat_event_cb(gconstpointer data);
+static void     tklock_datapipe_keyboard_slide_input_state_cb(gconstpointer const data);
+static void     tklock_datapipe_keyboard_slide_output_state_cb(gconstpointer const data);
+static void     tklock_datapipe_keyboard_available_state_cb(gconstpointer const data);
+static void     tklock_datapipe_light_sensor_poll_request_cb(gconstpointer const data);
+static void     tklock_datapipe_topmost_window_pid_cb(gconstpointer data);
+static void     tklock_datapipe_light_sensor_actual_cb(gconstpointer data);
 static void     tklock_datapipe_lid_sensor_is_working_cb(gconstpointer data);
-static void     tklock_datapipe_lid_cover_sensor_cb(gconstpointer data);
-static void     tklock_datapipe_lid_cover_policy_cb(gconstpointer data);
-static void     tklock_datapipe_lens_cover_cb(gconstpointer data);
-static void     tklock_datapipe_user_activity_cb(gconstpointer data);
+static void     tklock_datapipe_lid_sensor_actual_cb(gconstpointer data);
+static void     tklock_datapipe_lid_sensor_filtered_cb(gconstpointer data);
+static void     tklock_datapipe_lens_cover_state_cb(gconstpointer data);
+static bool     tklock_touch_activity_event_p(const struct input_event *ev);
+static void     tklock_datapipe_user_activity_event_cb(gconstpointer data);
+static void     tklock_datapipe_init_done_cb(gconstpointer data);
 
-static bool     tklock_datapipe_have_tklock_submode(void);
-static void     tklock_datapipe_set_device_lock_state(device_lock_state_t state);
+static bool     tklock_datapipe_in_tklock_submode(void);
+static void     tklock_datapipe_set_tklock_submode(bool lock);
+static void     tklock_datapipe_set_devicelock_state(devicelock_state_t state);
+static void     tklock_datapipe_rethink_interaction_expected(void);
+static void     tklock_datapipe_update_interaction_expected(bool expected);
 
 static void     tklock_datapipe_init(void);
 static void     tklock_datapipe_quit(void);
@@ -259,6 +279,9 @@ static void              tklock_lidpolicy_rethink             (void);
 
 // keyboard slide state machine
 
+static void     tklock_keyboard_slide_opened(void);
+static void     tklock_keyboard_slide_opened_cb(gpointer aptr);
+static void     tklock_keyboard_slide_closed(void);
 static void     tklock_keyboard_slide_rethink(void);
 
 // autolock state machine
@@ -288,15 +311,16 @@ static void     tklock_autolock_on_devlock_trigger(void);
 
 // ui exception handling state machine
 
-static uiexctype_t topmost_active(uiexctype_t mask);
-static void     tklock_uiexcept_sync_to_datapipe(void);
-static gboolean tklock_uiexcept_linger_cb(gpointer aptr);
-static void     tklock_uiexcept_begin(uiexctype_t type, int64_t linger);
-static void     tklock_uiexcept_end(uiexctype_t type, int64_t linger);
-static void     tklock_uiexcept_cancel(void);
-static void     tklock_uiexcept_finish(void);
-static bool     tklock_uiexcept_deny_state_restore(bool force, const char *cause);
-static void     tklock_uiexcept_rethink(void);
+static uiexception_type_t topmost_active(uiexception_type_t mask);
+
+static void     tklock_uiexception_sync_to_datapipe(void);
+static gboolean tklock_uiexception_linger_cb(gpointer aptr);
+static void     tklock_uiexception_begin(uiexception_type_t type, int64_t linger);
+static void     tklock_uiexception_end(uiexception_type_t type, int64_t linger);
+static void     tklock_uiexception_cancel(void);
+static void     tklock_uiexception_finish(void);
+static bool     tklock_uiexception_deny_state_restore(bool force, const char *cause);
+static void     tklock_uiexception_rethink(void);
 
 // low power mode ui state machine
 
@@ -330,6 +354,10 @@ static void     tklock_dtcalib_stop(void);
 
 static void     tklock_setting_sanitize_lid_open_actions(void);
 static void     tklock_setting_sanitize_lid_close_actions(void);
+static void     tklock_setting_sanitize_kbd_open_trigger(void);
+static void     tklock_setting_sanitize_kbd_open_actions(void);
+static void     tklock_setting_sanitize_kbd_close_trigger(void);
+static void     tklock_setting_sanitize_kbd_close_actions(void);
 
 static void     tklock_setting_cb(GConfClient *const gcc, const guint id, GConfEntry *const entry, gpointer const data);
 
@@ -348,15 +376,17 @@ static bool     tklock_ui_notify_must_be_delayed(void);
 static gboolean tklock_ui_notify_end_cb(gpointer data);
 static gboolean tklock_ui_notify_beg_cb(gpointer data);
 static void     tklock_ui_notify_schdule(void);
+static gboolean tklock_ui_sync_cb(gpointer aptr);
 static void     tklock_ui_notify_cancel(void);
 
 static void     tklock_ui_eat_event(void);
 static void     tklock_ui_open(void);
 static void     tklock_ui_close(void);
-static void     tklock_ui_set(bool enable);
+static bool     tklock_ui_is_enabled(void);
+static void     tklock_ui_set_enabled(bool enable);
 
-static void     tklock_ui_get_device_lock_cb(DBusPendingCall *pc, void *aptr);
-static void     tklock_ui_get_device_lock(void);
+static void     tklock_ui_get_devicelock_cb(DBusPendingCall *pc, void *aptr);
+static void     tklock_ui_get_devicelock(void);
 
 static void     tklock_ui_send_lpm_signal(void);
 static void     tklock_ui_enable_lpm(void);
@@ -377,11 +407,13 @@ static gboolean tklock_dbus_keyboard_available_state_get_req_cb(DBusMessage *con
 static gboolean tklock_dbus_send_tklock_mode(DBusMessage *const method_call);
 
 static gboolean tklock_dbus_mode_get_req_cb(DBusMessage *const msg);
+static tklock_request_t tklock_dbus_sanitize_requested_mode(tklock_request_t state);
+
 static gboolean tklock_dbus_mode_change_req_cb(DBusMessage *const msg);
 static gboolean tklock_dbus_interaction_expected_cb(DBusMessage *const msg);
 static gboolean tklock_dbus_systemui_callback_cb(DBusMessage *const msg);
 
-static gboolean tklock_dbus_device_lock_changed_cb(DBusMessage *const msg);
+static gboolean tklock_dbus_devicelock_changed_cb(DBusMessage *const msg);
 
 static gboolean tklock_dbus_notification_beg_cb(DBusMessage *const msg);
 static gboolean tklock_dbus_notification_end_cb(DBusMessage *const msg);
@@ -554,6 +586,14 @@ static guint exception_length_activity_setting_id = 0;
 static gboolean lockscreen_anim_enabled = MCE_DEFAULT_TK_LOCKSCREEN_ANIM_ENABLED;
 static guint    lockscreen_anim_enabled_setting_id = 0;
 
+/** Default delay for delaying proximity uncovered handling [ms] */
+static gint  tklock_proximity_delay_default = MCE_DEFAULT_TK_PROXIMITY_DELAY_DEFAULT;
+static guint tklock_proximity_delay_default_setting_id = 0;
+
+/** Delay for delaying proximity uncovered handling during calls [ms] */
+static gint  tklock_proximity_delay_incall = MCE_DEFAULT_TK_PROXIMITY_DELAY_INCALL;
+static guint tklock_proximity_delay_incall_setting_id = 0;
+
 /* ========================================================================= *
  * probed control file paths
  * ========================================================================= */
@@ -584,17 +624,59 @@ static output_state_t mce_keypad_sysfs_disable_output =
  * DATAPIPE VALUES AND TRIGGERS
  * ========================================================================= */
 
+/** Cached submode_pipe state; assume invalid */
+static submode_t submode = MCE_SUBMODE_INVALID;
+
+/** Cached PID of process owning the topmost window on UI */
+static int topmost_window_pid = -1;
+
+/** Cached init_done state; assume unknown */
+static tristate_t init_done = TRISTATE_UNKNOWN;
+
 /** Proximity state history for triggering low power mode ui */
 static ps_history_t tklock_lpmui_hist[8];
 
-/** Current tklock ui state */
-static bool tklock_ui_enabled = false;
+/** Current tklock ui state
+ *
+ * Access only via tklock_ui_is_enabled() / tklock_ui_set_enabled().
+ */
+static bool tklock_ui_enabled_pvt = false;
 
 /** Current tklock ui state that has been sent to lipstick */
 static int  tklock_ui_notified = -1; // does not match bool values
 
 /** System state; is undefined at bootup, can't assume anything */
-static system_state_t system_state = MCE_STATE_UNDEF;
+static system_state_t system_state = MCE_SYSTEM_STATE_UNDEF;
+
+/** Display state; undefined initially, can't assume anything */
+static display_state_t display_state_curr = MCE_DISPLAY_UNDEF;
+
+/** Next Display state; undefined initially, can't assume anything */
+static display_state_t display_state_next = MCE_DISPLAY_UNDEF;
+
+/** Call state; assume no active calls */
+static call_state_t call_state = CALL_STATE_NONE;
+
+/** Actual proximity state; assume not covered */
+static cover_state_t proximity_sensor_actual = COVER_UNDEF;
+
+/** Effective proximity state; assume not covered */
+static cover_state_t proximity_sensor_effective = COVER_UNDEF;
+
+/** Lid cover sensor state; assume unkown
+ *
+ * When in covered state, it is assumed that it is not physically
+ * possible to see/interact with the display and thus it should
+ * stay powered off.
+ *
+ * Originally was used to track Nokia N770 slidable cover. Now
+ * it is used also for things like the hammerhead magnetic lid
+ * sensor.
+ */
+static cover_state_t lid_sensor_actual = COVER_UNDEF;
+
+/** Lid cover policy state; assume unknown */
+static cover_state_t lid_sensor_filtered = COVER_UNDEF;
 
 /** Change notifications for system_state
  */
@@ -606,56 +688,57 @@ static void tklock_datapipe_system_state_cb(gconstpointer data)
     if( prev == system_state )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "system_state: %d -> %d", prev, system_state);
+    mce_log(LL_DEBUG, "system_state: %s -> %s",
+            system_state_repr(prev),
+            system_state_repr(system_state));
 
-    tklock_ui_set(false);
+    tklock_ui_set_enabled(false);
 
 EXIT:
     return;
 }
 
 /** Device lock state; assume undefined */
-static device_lock_state_t device_lock_state = DEVICE_LOCK_UNDEFINED;
+static devicelock_state_t devicelock_state = DEVICELOCK_STATE_UNDEFINED;
 
-/** Push device lock state value into device_lock_state_pipe datapipe
+/** Push device lock state value into devicelock_state_pipe datapipe
  */
-static void tklock_datapipe_set_device_lock_state(device_lock_state_t state)
+static void tklock_datapipe_set_devicelock_state(devicelock_state_t state)
 {
     switch( state ) {
-    case DEVICE_LOCK_UNLOCKED:
-    case DEVICE_LOCK_UNDEFINED:
-    case DEVICE_LOCK_LOCKED:
+    case DEVICELOCK_STATE_UNLOCKED:
+    case DEVICELOCK_STATE_UNDEFINED:
+    case DEVICELOCK_STATE_LOCKED:
         break;
 
     default:
         mce_log(LL_WARN, "unknown device lock state=%d; assuming locked",
                 state);
-        state = DEVICE_LOCK_LOCKED;
+        state = DEVICELOCK_STATE_LOCKED;
         break;
     }
 
-    if( device_lock_state != state ) {
-        execute_datapipe(&device_lock_state_pipe,
-                         GINT_TO_POINTER(state),
-                         USE_INDATA, CACHE_INDATA);
+    if( devicelock_state != state ) {
+        datapipe_exec_full(&devicelock_state_pipe,
+                           GINT_TO_POINTER(state));
     }
 }
 
-/** Change notifications for device_lock_state
+/** Change notifications for devicelock_state
  */
-static void tklock_datapipe_device_lock_state_cb(gconstpointer data)
+static void tklock_datapipe_devicelock_state_cb(gconstpointer data)
 {
-    device_lock_state_t prev = device_lock_state;
-    device_lock_state = GPOINTER_TO_INT(data);
+    devicelock_state_t prev = devicelock_state;
+    devicelock_state = GPOINTER_TO_INT(data);
 
-    if( device_lock_state == prev )
+    if( devicelock_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEVEL, "device_lock_state = %s -> %s",
-            device_lock_state_repr(prev),
-            device_lock_state_repr(device_lock_state));
+    mce_log(LL_DEVEL, "devicelock_state = %s -> %s",
+            devicelock_state_repr(prev),
+            devicelock_state_repr(devicelock_state));
 
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
     tklock_autolock_rethink();
 
@@ -664,13 +747,13 @@ static void tklock_datapipe_device_lock_state_cb(gconstpointer data)
      * We must not trigger autolock due to these initial
      * device lock transitions */
     switch( prev ) {
-    case DEVICE_LOCK_UNDEFINED:
+    case DEVICELOCK_STATE_UNDEFINED:
         /* Block autolock for 60 seconds when leaving
          * undefined state (= lipstick startup) */
         tklock_autolock_on_devlock_block(60 * 1000);
         break;
 
-    case DEVICE_LOCK_LOCKED:
+    case DEVICELOCK_STATE_LOCKED:
         /* Unblock autolock earlier if we see transition
          * away from locked state (=unlocked by user) */
         tklock_autolock_on_devlock_block(0);
@@ -680,15 +763,82 @@ static void tklock_datapipe_device_lock_state_cb(gconstpointer data)
         break;
     }
 
-    if( device_lock_state == DEVICE_LOCK_LOCKED )
+    switch( devicelock_state ) {
+    case DEVICELOCK_STATE_LOCKED:
         tklock_autolock_on_devlock_trigger();
+        break;
+    case DEVICELOCK_STATE_UNLOCKED:
+        switch( display_state_next ) {
+        case MCE_DISPLAY_OFF:
+        case MCE_DISPLAY_LPM_OFF:
+        case MCE_DISPLAY_LPM_ON:
+            /* Transitions from undefined -> unlocked state occur
+             * during device bootup / mce restart and should not
+             * cause any actions.
+             */
+            if( prev == DEVICELOCK_STATE_UNDEFINED )
+                break;
+
+            /* Devicelock ui keeps fingerprint scanner active in LPM state
+             * and unlocks device on identify, but omits unlock feedback
+             * and leaves the display state as-is.
+             *
+             * As a workaround, execute unlock feedback from mce. Then
+             * exit from LPM by requesting display power up and removal
+             * of tklock submode.
+             *
+             * While this is mostly relevant to LPM, apply the same logic
+             * also when in actually powered off display states to guard
+             * against timing glitches (getting fingerprint identification
+             * when already decided to exit LPM, etc) and changes in device
+             * lock ui side logic.
+             */
+            mce_log(LL_WARN, "device got unlocked while display is off; "
+                    "assume fingerprint authentication occurred");
+            datapipe_exec_full(&ngfd_event_request_pipe,
+                               "unlock_device");
+
+            /* Delay display state / tklock processing until proximity
+             * sensor state is known */
+            common_on_proximity_schedule(MODULE_NAME,
+                                         tklock_datapipe_devicelock_state_cb2,
+                                         0);
+            break;
+        default:
+            break;
+        }
+        break;
+    default:
+        break;
+    }
 
 EXIT:
     return;
 }
 
+/** Wait for proximity sensor -callback for fingerprint unlock handling
+ *
+ * @param aptr unused
+ */
+static void tklock_datapipe_devicelock_state_cb2(gpointer aptr)
+{
+    (void)aptr;
+
+    /* Still unlocked ? */
+    if( devicelock_state == DEVICELOCK_STATE_UNLOCKED ) {
+        if( proximity_sensor_actual != COVER_OPEN ) {
+            mce_log(LL_WARN, "unblank skipped due to proximity sensor");
+        }
+        else {
+            mce_datapipe_request_display_state(MCE_DISPLAY_ON);
+            mce_datapipe_request_tklock(TKLOCK_REQUEST_OFF);
+        }
+    }
+
+}
+
 /** Resumed from suspend notification */
-static void tklock_datapipe_device_resumed_cb(gconstpointer data)
+static void tklock_datapipe_resume_detected_event_cb(gconstpointer data)
 {
     (void) data;
 
@@ -698,30 +848,30 @@ static void tklock_datapipe_device_resumed_cb(gconstpointer data)
 }
 
 /** devicelock dbus name is reserved; assume unknown */
-static service_state_t devicelock_available = SERVICE_STATE_UNDEF;
+static service_state_t devicelock_service_state = SERVICE_STATE_UNDEF;
 
-/** Change notifications for devicelock_available
+/** Change notifications for devicelock_service_state
  */
-static void tklock_datapipe_devicelock_available_cb(gconstpointer data)
+static void tklock_datapipe_devicelock_service_state_cb(gconstpointer data)
 {
-    service_state_t prev = devicelock_available;
-    devicelock_available = GPOINTER_TO_INT(data);
+    service_state_t prev = devicelock_service_state;
+    devicelock_service_state = GPOINTER_TO_INT(data);
 
-    if( devicelock_available == prev )
+    if( devicelock_service_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "devicelock_available = %s -> %s",
+    mce_log(LL_DEBUG, "devicelock_service_state = %s -> %s",
             service_state_repr(prev),
-            service_state_repr(devicelock_available));
+            service_state_repr(devicelock_service_state));
 
-    if( devicelock_available == SERVICE_STATE_RUNNING ) {
+    if( devicelock_service_state == SERVICE_STATE_RUNNING ) {
         /* query initial device lock state on devicelock/mce startup */
-        tklock_ui_get_device_lock();
+        tklock_ui_get_devicelock();
     }
     else {
         /* if device lock service is not running, the device lock
          * state is undefined */
-        tklock_datapipe_set_device_lock_state(DEVICE_LOCK_UNDEFINED);
+        tklock_datapipe_set_devicelock_state(DEVICELOCK_STATE_UNDEFINED);
     }
 
 EXIT:
@@ -729,50 +879,69 @@ EXIT:
 }
 
 /** Lipstick dbus name is reserved; assume false */
-static service_state_t lipstick_available = SERVICE_STATE_UNDEF;
+static service_state_t lipstick_service_state = SERVICE_STATE_UNDEF;
 
-/** Change notifications for lipstick_available
+/** Change notifications for lipstick_service_state
  */
-static void tklock_datapipe_lipstick_available_cb(gconstpointer data)
+static void tklock_datapipe_lipstick_service_state_cb(gconstpointer data)
 {
-    service_state_t prev = lipstick_available;
-    lipstick_available = GPOINTER_TO_INT(data);
+    service_state_t prev = lipstick_service_state;
+    lipstick_service_state = GPOINTER_TO_INT(data);
 
-    if( lipstick_available == prev )
+    if( lipstick_service_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "lipstick_available = %s -> %s",
+    mce_log(LL_DEBUG, "lipstick_service_state = %s -> %s",
             service_state_repr(prev),
-            service_state_repr(lipstick_available));
+            service_state_repr(lipstick_service_state));
+
+    bool enable_tklock = false;
+
+    /* Tklock is applicable only when lipstick is running */
+    if( lipstick_service_state == SERVICE_STATE_RUNNING ) {
+        /* STOPPED -> RUNNING: Implies lipstick start / restart.
+         * In this case lockscreen status is decided by lipstick.
+         * We achieve tklock state synchronization by making a
+         * lockscreen deactivation request - which lipstick can
+         * then choose to honor or override.
+         *
+         * UNDEF -> RUNNING: Implies a mce restart while lipstick
+         * is running. What we would like to happen is that
+         * things stay exactly as they were. However there is
+         * no way to recover lockscreen state from lipstick.
+         * So in order to err on the safer side, we activate
+         * lockscreen to get tklock state in sync again.
+         */
+        if( prev == SERVICE_STATE_UNDEF )
+            enable_tklock = true;
+    }
 
     // force tklock ipc
     tklock_ui_notified = -1;
-    tklock_ui_set(false);
+    tklock_ui_set_enabled(enable_tklock);
 
 EXIT:
     return;
 }
 
 /** Update mode is active; assume false */
-static bool update_mode = false;
+static bool osupdate_running = false;
 
-/** Change notifications for update_mode
+/** Change notifications for osupdate_running
  */
-static void tklock_datapipe_update_mode_cb(gconstpointer data)
+static void tklock_datapipe_osupdate_running_cb(gconstpointer data)
 {
-    bool prev = update_mode;
-    update_mode = GPOINTER_TO_INT(data);
+    bool prev = osupdate_running;
+    osupdate_running = GPOINTER_TO_INT(data);
 
-    if( update_mode == prev )
+    if( osupdate_running == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "update_mode = %d -> %d", prev, update_mode);
+    mce_log(LL_DEBUG, "osupdate_running = %d -> %d", prev, osupdate_running);
 
-    if( update_mode ) {
+    if( osupdate_running ) {
         /* undo tklock when update mode starts */
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_OFF),
-                         USE_INDATA, CACHE_INDATA);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_OFF);
     }
 
 EXIT:
@@ -792,7 +961,8 @@ static void tklock_datapipe_shutting_down_cb(gconstpointer data)
     if( shutting_down == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "shutting_down = %d -> %d", prev, shutting_down);
+    mce_log(LL_DEBUG, "shutting_down = %d -> %d",
+            prev, shutting_down);
 
     tklock_evctrl_rethink();
 
@@ -800,41 +970,37 @@ EXIT:
     return;
 }
 
-/** Display state; undefined initially, can't assume anything */
-static display_state_t display_state = MCE_DISPLAY_UNDEF;
-
-/** Next Display state; undefined initially, can't assume anything */
-static display_state_t display_state_next = MCE_DISPLAY_UNDEF;
-
 /** Autorelock trigger: assume disabled */
 static autorelock_t autorelock_trigger = AUTORELOCK_NO_TRIGGERS;
 
-/** Change notifications for display_state
+/** Change notifications for display_state_curr
  */
-static void tklock_datapipe_display_state_cb(gconstpointer data)
+static void tklock_datapipe_display_state_curr_cb(gconstpointer data)
 {
-    display_state_t prev = display_state;
-    display_state = GPOINTER_TO_INT(data);
+    display_state_t prev = display_state_curr;
+    display_state_curr = GPOINTER_TO_INT(data);
 
-    if( display_state == prev )
+    if( display_state_curr == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "display_state = %s -> %s",
+    mce_log(LL_DEBUG, "display_state_curr = %s -> %s",
             display_state_repr(prev),
-            display_state_repr(display_state));
+            display_state_repr(display_state_curr));
+
+    tklock_datapipe_rethink_interaction_expected();
 
     tklock_lidfilter_rethink_allow_close();
 
     /* Disable "wakeup with fake policy" hack
      * when any stable display state is reached */
-    if( display_state != MCE_DISPLAY_POWER_UP &&
-        display_state != MCE_DISPLAY_POWER_DOWN )
-        tklock_uiexcept_end(UIEXC_NOANIM, 0);
+    if( display_state_curr != MCE_DISPLAY_POWER_UP &&
+        display_state_curr != MCE_DISPLAY_POWER_DOWN )
+        tklock_uiexception_end(UIEXCEPTION_TYPE_NOANIM, 0);
 
-    if( display_state == MCE_DISPLAY_DIM )
+    if( display_state_curr == MCE_DISPLAY_DIM )
         tklock_ui_eat_event();
 
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
     tklock_autolock_rethink();
     tklock_proxlock_rethink();
@@ -847,17 +1013,17 @@ EXIT:
     return;
 }
 
-/** Pre-change notifications for display_state
+/** Pre-change notifications for display_state_curr
  */
 static void tklock_datapipe_display_state_next_cb(gconstpointer data)
 {
     display_state_next = GPOINTER_TO_INT(data);
 
     mce_log(LL_DEBUG, "display_state_next = %s -> %s",
-            display_state_repr(display_state),
+            display_state_repr(display_state_curr),
             display_state_repr(display_state_next));
 
-    if( display_state_next == display_state )
+    if( display_state_next == display_state_curr )
         goto EXIT;
 
     /* Cancel autorelock on display off */
@@ -890,47 +1056,99 @@ EXIT:
 
 }
 
-/** Call state; assume no active calls */
-static call_state_t call_state = CALL_STATE_NONE;
-
-/** Actual proximity state; assume not covered */
-static cover_state_t proximity_state_actual = COVER_OPEN;
-
-/** Effective proximity state; assume not covered */
-static cover_state_t proximity_state_effective = COVER_OPEN;
-
-/** Lid cover sensor state; assume unkown
- *
- * When in covered state, it is assumed that it is not physically
- * possible to see/interact with the display and thus it should
- * stay powered off.
- *
- * Originally was used to track Nokia N770 slidable cover. Now
- * it is used also for things like the hammerhead magnetic lid
- * sensor.
- */
-static cover_state_t lid_cover_sensor_state = COVER_UNDEF;
-
-/** Lid cover policy state; assume unknown */
-static cover_state_t lid_cover_policy_state = COVER_UNDEF;
-
 /** Timer id for delayed proximity uncovering */
 static guint tklock_datapipe_proximity_uncover_id = 0;
+
+/** Re-evaluate proximity sensor debugging led pattern state
+ */
+static void tklock_datapipe_proximity_eval_led(void)
+{
+    typedef enum {
+        PROXIMITY_LED_STATE_UNDEFINED  = 0,
+        PROXIMITY_LED_STATE_COVERED    = 1,
+        PROXIMITY_LED_STATE_UNCOVERING = 2,
+        PROXIMITY_LED_STATE_UNCOVERED  = 3,
+    } proximity_led_state_t;
+
+    static proximity_led_state_t prev = PROXIMITY_LED_STATE_UNDEFINED;
+
+    /* Evaluate what led pattern should be active */
+    proximity_led_state_t curr = PROXIMITY_LED_STATE_UNDEFINED;
+
+    if( proximity_sensor_effective == COVER_OPEN )
+        curr = PROXIMITY_LED_STATE_UNCOVERED;
+    else if( proximity_sensor_actual == COVER_OPEN )
+        curr = PROXIMITY_LED_STATE_UNCOVERING;
+    else if( proximity_sensor_actual == COVER_CLOSED )
+        curr = PROXIMITY_LED_STATE_COVERED;
+
+    if( prev == curr )
+        goto EXIT;
+
+    /* Activate new pattern 1st, then deactivate old pattern
+     * to avoid transition via no active pattern.
+     */
+
+    switch( curr )
+    {
+    case PROXIMITY_LED_STATE_UNCOVERED:
+        datapipe_exec_full(&led_pattern_activate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_UNCOVERED);
+        break;
+    case PROXIMITY_LED_STATE_UNCOVERING:
+        datapipe_exec_full(&led_pattern_activate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_UNCOVERING);
+        break;
+    case PROXIMITY_LED_STATE_COVERED:
+        datapipe_exec_full(&led_pattern_activate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_COVERED);
+        break;
+    default:
+        break;
+    }
+
+    switch( prev )
+    {
+    case PROXIMITY_LED_STATE_UNCOVERED:
+        datapipe_exec_full(&led_pattern_deactivate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_UNCOVERED);
+        break;
+    case PROXIMITY_LED_STATE_UNCOVERING:
+        datapipe_exec_full(&led_pattern_deactivate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_UNCOVERING);
+        break;
+    case PROXIMITY_LED_STATE_COVERED:
+        datapipe_exec_full(&led_pattern_deactivate_pipe,
+                           MCE_LED_PATTERN_PROXIMITY_COVERED);
+        break;
+    default:
+        break;
+    }
+
+    prev = curr;
+
+EXIT:
+    return;
+}
 
 /** Set effective proximity state from current sensor state
  */
 static void tklock_datapipe_proximity_update(void)
 {
-    if( proximity_state_effective == proximity_state_actual )
+    if( proximity_sensor_effective == proximity_sensor_actual )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "proximity_state_effective = %s -> %s",
-            proximity_state_repr(proximity_state_effective),
-            proximity_state_repr(proximity_state_actual));
+    mce_log(LL_DEBUG, "proximity_sensor_effective = %s -> %s",
+            proximity_state_repr(proximity_sensor_effective),
+            proximity_state_repr(proximity_sensor_actual));
 
-    proximity_state_effective = proximity_state_actual;
+    proximity_sensor_effective = proximity_sensor_actual;
 
-    tklock_uiexcept_rethink();
+    datapipe_exec_full(&proximity_sensor_effective_pipe,
+                       GINT_TO_POINTER(proximity_sensor_effective));
+
+    tklock_datapipe_proximity_eval_led();
+    tklock_uiexception_rethink();
     tklock_proxlock_rethink();
     tklock_evctrl_rethink();
 
@@ -971,14 +1189,6 @@ static void tklock_datapipe_proximity_uncover_cancel(void)
     }
 }
 
-enum {
-    /** Default delay for delaying proximity uncovered handling [ms] */
-    PROXIMITY_DELAY_DEFAULT = 100,
-
-    /** Delay for delaying proximity uncovered handling during calls [ms] */
-    PROXIMITY_DELAY_INCALL  = 500,
-};
-
 /** Schedule delayed proximity uncovering
  */
 static void tklock_datapipe_proximity_uncover_schedule(void)
@@ -988,36 +1198,40 @@ static void tklock_datapipe_proximity_uncover_schedule(void)
     else
         wakelock_lock("mce_proximity_stm", -1);
 
-    int delay = PROXIMITY_DELAY_DEFAULT;
+    int delay = tklock_proximity_delay_default;
 
     if( call_state == CALL_STATE_ACTIVE )
-        delay = PROXIMITY_DELAY_INCALL;
+        delay = tklock_proximity_delay_incall;
+
+    if( delay < MCE_MINIMUM_TK_PROXIMITY_DELAY )
+        delay = MCE_MINIMUM_TK_PROXIMITY_DELAY;
+    else if( delay > MCE_MAXIMUM_TK_PROXIMITY_DELAY )
+        delay = MCE_MAXIMUM_TK_PROXIMITY_DELAY;
 
     tklock_datapipe_proximity_uncover_id =
         g_timeout_add(delay, tklock_datapipe_proximity_uncover_cb, 0);
 }
 
-/** Change notifications for proximity_state_actual
+/** Change notifications for proximity_sensor_actual
  */
-static void tklock_datapipe_proximity_sensor_cb(gconstpointer data)
+static void tklock_datapipe_proximity_sensor_actual_cb(gconstpointer data)
 {
-    cover_state_t prev = proximity_state_actual;
-    proximity_state_actual = GPOINTER_TO_INT(data);
+    cover_state_t prev = proximity_sensor_actual;
+    proximity_sensor_actual = GPOINTER_TO_INT(data);
 
-    if( proximity_state_actual == COVER_UNDEF )
-        proximity_state_actual = COVER_OPEN;
-
-    if( proximity_state_actual == prev )
+    if( proximity_sensor_actual == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "proximity_state_actual = %s -> %s",
+    mce_log(LL_DEBUG, "proximity_sensor_actual = %s -> %s",
             proximity_state_repr(prev),
-            proximity_state_repr(proximity_state_actual));
+            proximity_state_repr(proximity_sensor_actual));
+
+    tklock_datapipe_proximity_eval_led();
 
     /* update lpm ui proximity history using raw data */
-    tklock_lpmui_update_history(proximity_state_actual);
+    tklock_lpmui_update_history(proximity_sensor_actual);
 
-    if( proximity_state_actual == COVER_OPEN ) {
+    if( proximity_sensor_actual == COVER_OPEN ) {
         tklock_datapipe_proximity_uncover_schedule();
     }
     else {
@@ -1057,13 +1271,13 @@ static void tklock_datapipe_call_state_cb(gconstpointer data)
         /* Fall through */
 
     case CALL_STATE_ACTIVE:
-        tklock_uiexcept_begin(UIEXC_CALL, 0);
+        tklock_uiexception_begin(UIEXCEPTION_TYPE_CALL, 0);
         break;
 
     default:
-        tklock_uiexcept_end(UIEXC_CALL, incoming ?
-                            exception_length_call_in :
-                            exception_length_call_out);
+        tklock_uiexception_end(UIEXCEPTION_TYPE_CALL, incoming ?
+                               exception_length_call_in :
+                               exception_length_call_out);
 
         /* Restore linger time to default again */
         incoming = false;
@@ -1071,7 +1285,7 @@ static void tklock_datapipe_call_state_cb(gconstpointer data)
     }
 
     // display on/off policy
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
     // volume keys during call
     tklock_evctrl_rethink();
@@ -1080,19 +1294,20 @@ EXIT:
 }
 
 /** Music playback state; assume not playing */
-static bool music_playback = false;
+static bool music_playback_ongoing = false;
 
-/** Change notifications for music_playback
+/** Change notifications for music_playback_ongoing
  */
-static void tklock_datapipe_music_playback_cb(gconstpointer data)
+static void tklock_datapipe_music_playback_ongoing_cb(gconstpointer data)
 {
-    bool prev = music_playback;
-    music_playback = GPOINTER_TO_INT(data);
+    bool prev = music_playback_ongoing;
+    music_playback_ongoing = GPOINTER_TO_INT(data);
 
-    if( music_playback == prev )
+    if( music_playback_ongoing == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "music_playback = %d -> %d", prev, music_playback);
+    mce_log(LL_DEBUG, "music_playback_ongoing = %d -> %d",
+            prev, music_playback_ongoing);
 
     // volume keys during playback
     tklock_evctrl_rethink();
@@ -1123,14 +1338,14 @@ static void tklock_datapipe_alarm_ui_state_cb(gconstpointer data)
     switch( alarm_ui_state ) {
     case MCE_ALARM_UI_RINGING_INT32:
     case MCE_ALARM_UI_VISIBLE_INT32:
-        tklock_uiexcept_begin(UIEXC_ALARM, 0);
+        tklock_uiexception_begin(UIEXCEPTION_TYPE_ALARM, 0);
         break;
     default:
-        tklock_uiexcept_end(UIEXC_ALARM, exception_length_alarm);
+        tklock_uiexception_end(UIEXCEPTION_TYPE_ALARM, exception_length_alarm);
         break;
     }
 
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
 EXIT:
     return;
@@ -1197,7 +1412,7 @@ static usb_cable_state_t usb_cable_state = USB_CABLE_UNDEF;
 
 /** Change notifications for usb_cable_state
  */
-static void tklock_datapipe_usb_cable_cb(gconstpointer data)
+static void tklock_datapipe_usb_cable_state_cb(gconstpointer data)
 {
     usb_cable_state_t prev = usb_cable_state;
     usb_cable_state = GPOINTER_TO_INT(data);
@@ -1242,7 +1457,7 @@ static cover_state_t jack_sense_state = COVER_UNDEF;
 
 /** Change notifications for jack_sense_state
  */
-static void tklock_datapipe_jack_sense_cb(gconstpointer data)
+static void tklock_datapipe_jack_sense_state_cb(gconstpointer data)
 {
     cover_state_t prev = jack_sense_state;
     jack_sense_state = GPOINTER_TO_INT(data);
@@ -1278,7 +1493,7 @@ EXIT:
 
 /** Change notifications for camera_button
  */
-static void tklock_datapipe_camera_button_cb(gconstpointer const data)
+static void tklock_datapipe_camera_button_state_cb(gconstpointer const data)
 {
     /* TODO: This might make no sense, need to check on HW that has
      *       dedicated camera button ... */
@@ -1290,7 +1505,7 @@ static void tklock_datapipe_camera_button_cb(gconstpointer const data)
 
 /** Change notifications for keypress
  */
-static void tklock_datapipe_keypress_cb(gconstpointer const data)
+static void tklock_datapipe_keypress_event_cb(gconstpointer const data)
 {
     const struct input_event *const*evp;
     const struct input_event       *ev;
@@ -1322,6 +1537,10 @@ static void tklock_datapipe_keypress_cb(gconstpointer const data)
 
     case KEY_VOLUMEDOWN:
     case KEY_VOLUMEUP:
+        if( datapipe_get_gint(keypad_grab_wanted_pipe) ) {
+            mce_log(LL_DEVEL, "volume key ignored");
+            break;
+        }
         mce_log(LL_DEBUG, "volume key");
         mce_tklock_begin_notification(0, "mce_volume_key",
                                       exception_length_volume, -1);
@@ -1336,24 +1555,24 @@ EXIT:
 }
 
 /** UI exception state; initialized to none */
-static uiexctype_t exception_state = UIEXC_NONE;
+static uiexception_type_t uiexception_type = UIEXCEPTION_TYPE_NONE;
 
-/** Change notifications for exception_state
+/** Change notifications for uiexception_type
  */
-static void tklock_datapipe_exception_state_cb(gconstpointer data)
+static void tklock_datapipe_uiexception_type_cb(gconstpointer data)
 {
-    uiexctype_t prev = exception_state;
-    exception_state = GPOINTER_TO_INT(data);
+    uiexception_type_t prev = uiexception_type;
+    uiexception_type = GPOINTER_TO_INT(data);
 
-    if( exception_state == prev )
+    if( uiexception_type == prev )
         goto EXIT;
 
-    mce_log(LL_CRUCIAL, "exception_state = %s -> %s",
-            uiexctype_repr(prev),
-            uiexctype_repr(exception_state));
+    mce_log(LL_CRUCIAL, "uiexception_type = %s -> %s",
+            uiexception_type_repr(prev),
+            uiexception_type_repr(uiexception_type));
 
     /* Cancel autorelock if there is a call or alarm */
-    if( (exception_state & (UIEXC_CALL | UIEXC_ALARM)) &&
+    if( (uiexception_type & (UIEXCEPTION_TYPE_CALL | UIEXCEPTION_TYPE_ALARM)) &&
         autorelock_trigger != AUTORELOCK_NO_TRIGGERS ) {
         mce_log(LL_DEBUG, "autorelock canceled: handling call/alarm");
         autorelock_trigger = AUTORELOCK_NO_TRIGGERS;
@@ -1390,46 +1609,50 @@ static void tklock_datapipe_audio_route_cb(gconstpointer data)
         goto EXIT;
 
     mce_log(LL_DEBUG, "audio_route = %d -> %d", prev, audio_route);
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
 EXIT:
     return;
 }
 
-/** Change notifications for tk_lock_pipe
+/** Change notifications for tklock_request_pipe
  *
  * Handles tklock requests from outside this module
  */
-static void tklock_datapipe_tk_lock_cb(gconstpointer data)
+static void tklock_datapipe_tklock_request_cb(gconstpointer data)
 {
-    lock_state_t tk_lock_state = GPOINTER_TO_INT(data);
+    tklock_request_t tklock_request = GPOINTER_TO_INT(data);
 
-    mce_log(LL_DEBUG, "tk_lock_state = %d", tk_lock_state);
+    mce_log(LL_DEBUG, "tklock_request = %s",
+            tklock_request_repr(tklock_request));
 
-    bool enable = tklock_ui_enabled;
+    bool enable = tklock_ui_is_enabled();
 
-    switch( tk_lock_state ) {
-    case LOCK_UNDEF:
-    case LOCK_OFF:
-    case LOCK_OFF_DELAYED:
+    switch( tklock_request ) {
+    case TKLOCK_REQUEST_UNDEF:
+    case TKLOCK_REQUEST_OFF:
+    case TKLOCK_REQUEST_OFF_DELAYED:
         enable = false;
         break;
     default:
-    case LOCK_OFF_PROXIMITY:
-    case LOCK_ON:
-    case LOCK_ON_DIMMED:
-    case LOCK_ON_PROXIMITY:
-    case LOCK_ON_DELAYED:
+    case TKLOCK_REQUEST_OFF_PROXIMITY:
+    case TKLOCK_REQUEST_ON:
+    case TKLOCK_REQUEST_ON_DIMMED:
+    case TKLOCK_REQUEST_ON_PROXIMITY:
+    case TKLOCK_REQUEST_ON_DELAYED:
         enable = true;
         break;
-    case LOCK_TOGGLE:
+    case TKLOCK_REQUEST_TOGGLE:
         enable = !enable;
     }
-    tklock_ui_set(enable);
+    tklock_ui_set_enabled(enable);
 }
 
 /** Interaction expected; assume false */
 static bool interaction_expected = false;
+
+/** Interaction expected; unfiltered info from compositor */
+static bool interaction_expected_raw = false;
 
 /** Change notifications for interaction_expected_pipe
  */
@@ -1447,7 +1670,7 @@ static void tklock_datapipe_interaction_expected_cb(gconstpointer data)
     /* All changes must be ignored when handling exceptional things
      * like calls and alarms that are shown on top of lockscreen ui.
      */
-    if( exception_state & (UIEXC_CALL | UIEXC_ALARM) )
+    if( uiexception_type & (UIEXCEPTION_TYPE_CALL | UIEXCEPTION_TYPE_ALARM) )
         goto EXIT;
 
     /* Edge triggered action: When interaction becomes expected
@@ -1457,15 +1680,109 @@ static void tklock_datapipe_interaction_expected_cb(gconstpointer data)
      * code entry view) the display state restore should be disabled.
      */
     if( display_state_next == MCE_DISPLAY_ON &&
-        tklock_ui_enabled && interaction_expected ) {
-        tklock_uiexcept_deny_state_restore(true, "interaction expected");
+        tklock_ui_is_enabled() && interaction_expected ) {
+        tklock_uiexception_deny_state_restore(true, "interaction expected");
     }
 
 EXIT:
     return;
 }
 
-static submode_t submode = MCE_INVALID_SUBMODE;
+/** Re-evaluate effective interaction_expected value
+ *
+ * The notifications from compositor side do not always make
+ * sense from mce point of view.
+ *
+ * This function:
+ * - Normalizes the interaction_expected value by filtering out
+ *   obviously impossible situations such as having interacation
+ *   expected while display is powered off.
+ * - Should be called whenever state variables used in the
+ *   filtering have changed.
+ */
+static void tklock_datapipe_rethink_interaction_expected(void)
+{
+    bool use = interaction_expected_raw;
+
+    switch( display_state_curr ) {
+    case MCE_DISPLAY_ON:
+    case MCE_DISPLAY_DIM:
+        /* Display is in state that allows interaction */
+        if( submode & MCE_SUBMODE_TKLOCK ) {
+            /* Lockscreen active
+             * -> use reported state
+             */
+        }
+        else if( topmost_window_pid == -1 ) {
+            /* Home screen active
+             * -> use reported state
+             */
+        }
+        else {
+            /* Application active
+             * -> ignore reported state
+             */
+            use = true;
+        }
+        break;
+    default:
+        /* Display is not in state allowing interaction
+         * -> ignore reported state */
+        use = false;
+        break;
+    }
+
+    if( interaction_expected != use )
+        datapipe_exec_full(&interaction_expected_pipe, GINT_TO_POINTER(use));
+}
+
+/** Update raw interaction expected state
+ *
+ * Updates cached raw value and re-calculates effective value.
+ *
+ * @param expected  state as reported by compositor
+ */
+static void tklock_datapipe_update_interaction_expected(bool expected)
+{
+    if( interaction_expected_raw == expected )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "interaction_expected_raw: %d -> %d",
+            interaction_expected_raw, expected);
+
+    interaction_expected_raw = expected;
+    tklock_datapipe_rethink_interaction_expected();
+
+EXIT:
+    return;
+
+}
+
+/** Filter tklock submode changes
+ *
+ * All tklock submode changes are subjected to policy implemented
+ * at tklock_ui_xxx() functions.
+ *
+ * Basically this ensures tklock_datapipe_submode_cb() will never
+ * see submode values where tklock would not agree with policy.
+ */
+static gpointer tklock_datapipe_submode_filter_cb(gpointer data)
+{
+    submode_t input  = GPOINTER_TO_INT(data);
+    submode_t output = input;
+
+    tklock_ui_set_enabled(input & MCE_SUBMODE_TKLOCK);
+
+    if( tklock_ui_is_enabled() )
+        output |= MCE_SUBMODE_TKLOCK;
+    else
+        output &= ~MCE_SUBMODE_TKLOCK;
+
+    if( input != output )
+        mce_log(LL_DEBUG, "submode filter: %s", submode_change_repr(input, output));
+
+    return GINT_TO_POINTER(output);
+}
 
 /** Change notifications for submode
  */
@@ -1477,10 +1794,15 @@ static void tklock_datapipe_submode_cb(gconstpointer data)
     if( submode == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "submode = 0x%x", submode);
+    /* Note: Due to filtering at tklock_datapipe_submode_filter_cb()
+     *       the submode value seen here is always in sync with policy
+     *       implemented at tklock_ui_xxx() functions.
+     */
+
+    mce_log(LL_DEBUG, "submode = %s", submode_change_repr(prev, submode));
 
     // out of sync tklock state blocks state restore
-    tklock_uiexcept_rethink();
+    tklock_uiexception_rethink();
 
     // block tklock removal while autolock rules apply
     tklock_autolock_rethink();
@@ -1489,10 +1811,12 @@ static void tklock_datapipe_submode_cb(gconstpointer data)
     tklock_evctrl_rethink();
 
     // skip the rest if tklock did not change
-    if( !((prev ^ submode) & MCE_TKLOCK_SUBMODE) )
+    if( !((prev ^ submode) & MCE_SUBMODE_TKLOCK) )
         goto EXIT;
 
-    if( submode & MCE_TKLOCK_SUBMODE ) {
+    tklock_datapipe_rethink_interaction_expected();
+
+    if( submode & MCE_SUBMODE_TKLOCK ) {
         // tklock added
     }
     else {
@@ -1508,7 +1832,7 @@ static void tklock_datapipe_submode_cb(gconstpointer data)
             /* Nevertheless, removal of tklock means there is something
              * happening at the ui side - and probably the best course of
              * action is to cancel lpm state by turning on the display. */
-            mce_datapipe_req_display_state(MCE_DISPLAY_ON);
+            mce_datapipe_request_display_state(MCE_DISPLAY_ON);
             break;
 
         default:
@@ -1530,25 +1854,47 @@ EXIT:
  * @return TRUE if the touchscreen/keypad lock is enabled,
  *         FALSE if the touchscreen/keypad lock is disabled
  */
-static bool tklock_datapipe_have_tklock_submode(void)
+static bool tklock_datapipe_in_tklock_submode(void)
 {
-    return (submode & MCE_TKLOCK_SUBMODE) != 0;
+    return (submode & MCE_SUBMODE_TKLOCK) != 0;
 }
 
-/** Change notifications for lockkey_pipe
+static void tklock_datapipe_set_tklock_submode(bool lock)
+{
+    /* This function should be called only via:
+     *
+     * tklock_ui_set_enabled()
+     *    tklock_ui_sync_cb()
+     *       tklock_datapipe_set_tklock_submode()
+     */
+
+    mce_log(LL_DEBUG, "tklock submode request: %s",
+            lock ? "LOCK" : "UNLOCK");
+
+    if( lock )
+        mce_add_submode_int32(MCE_SUBMODE_TKLOCK);
+    else
+        mce_rem_submode_int32(MCE_SUBMODE_TKLOCK);
+}
+
+/** Change notifications for lockkey_state_pipe
  */
-static void tklock_datapipe_lockkey_cb(gconstpointer const data)
+static void tklock_datapipe_lockkey_state_cb(gconstpointer const data)
 {
     /* TODO: IIRC lock key is N900 hw feature, I have not had a chance
      *       to test if this actually works ... */
 
+    key_state_t key_state = GPOINTER_TO_INT(data);
+
+    mce_log(LL_DEBUG, "lockkey: %s", key_state_repr(key_state));
+
     /* Ignore release events */
-    if( GPOINTER_TO_INT(data) == 0 )
+    if( key_state != KEY_STATE_PRESSED )
         goto EXIT;
 
     /* Try to give it the same treatment as power key would get.
      * Copy pasted from generic_powerkey_handler() @ powerkey.c */
-    switch( display_state_get() ) {
+    switch( display_state_next ) {
     case MCE_DISPLAY_ON:
     case MCE_DISPLAY_DIM:
     case MCE_DISPLAY_POWER_UP:
@@ -1559,11 +1905,8 @@ static void tklock_datapipe_lockkey_cb(gconstpointer const data)
          * The tklock requests get ignored in act dead
          * etc, so we can just blindly request it.
          */
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_ON),
-                         USE_INDATA, CACHE_INDATA);
-
-        mce_datapipe_req_display_state(MCE_DISPLAY_OFF);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
+        mce_datapipe_request_display_state(MCE_DISPLAY_OFF);
         break;
 
     default:
@@ -1573,7 +1916,7 @@ static void tklock_datapipe_lockkey_cb(gconstpointer const data)
     case MCE_DISPLAY_LPM_ON:
     case MCE_DISPLAY_POWER_DOWN:
         mce_log(LL_DEBUG, "display -> on");
-        mce_datapipe_req_display_state(MCE_DISPLAY_ON);
+        mce_datapipe_request_display_state(MCE_DISPLAY_ON);
         break;
     }
 
@@ -1581,9 +1924,9 @@ EXIT:
     return;
 }
 
-/** Change notifications for heartbeat_pipe
+/** Change notifications for heartbeat_event_pipe
  */
-static void tklock_datapipe_heartbeat_cb(gconstpointer data)
+static void tklock_datapipe_heartbeat_event_cb(gconstpointer data)
 {
     (void)data;
 
@@ -1592,24 +1935,24 @@ static void tklock_datapipe_heartbeat_cb(gconstpointer data)
 }
 
 /** Keypad slide input state; assume closed */
-static cover_state_t kbd_slide_input_state = COVER_CLOSED;
+static cover_state_t keyboard_slide_input_state = COVER_CLOSED;
 
-/** Change notifications from keyboard_slide_pipe
+/** Change notifications from keyboard_slide_state_pipe
  */
-static void tklock_datapipe_keyboard_slide_input_cb(gconstpointer const data)
+static void tklock_datapipe_keyboard_slide_input_state_cb(gconstpointer const data)
 {
-    cover_state_t prev = kbd_slide_input_state;
-    kbd_slide_input_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = keyboard_slide_input_state;
+    keyboard_slide_input_state = GPOINTER_TO_INT(data);
 
-    if( kbd_slide_input_state == COVER_UNDEF )
-        kbd_slide_input_state = COVER_CLOSED;
+    if( keyboard_slide_input_state == COVER_UNDEF )
+        keyboard_slide_input_state = COVER_CLOSED;
 
-    if( kbd_slide_input_state == prev )
+    if( keyboard_slide_input_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEVEL, "kbd_slide_input_state = %s -> %s",
+    mce_log(LL_DEVEL, "keyboard_slide_input_state = %s -> %s",
             cover_state_repr(prev),
-            cover_state_repr(kbd_slide_input_state));
+            cover_state_repr(keyboard_slide_input_state));
 
     tklock_keyboard_slide_rethink();
 
@@ -1618,20 +1961,20 @@ EXIT:
 }
 
 /** Keypad slide output state; assume unknown */
-static cover_state_t kbd_slide_output_state = COVER_UNDEF;
+static cover_state_t keyboard_slide_output_state = COVER_UNDEF;
 
 static void
-tklock_datapipe_keyboard_slide_output_cb(gconstpointer const data)
+tklock_datapipe_keyboard_slide_output_state_cb(gconstpointer const data)
 {
-    cover_state_t prev = kbd_slide_output_state;
-    kbd_slide_output_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = keyboard_slide_output_state;
+    keyboard_slide_output_state = GPOINTER_TO_INT(data);
 
-    if( kbd_slide_output_state == prev )
+    if( keyboard_slide_output_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEVEL, "kbd_slide_output_state = %s -> %s",
+    mce_log(LL_DEVEL, "keyboard_slide_output_state = %s -> %s",
             cover_state_repr(prev),
-            cover_state_repr(kbd_slide_output_state));
+            cover_state_repr(keyboard_slide_output_state));
 
     tklock_dbus_send_keyboard_slide_state(0);
 
@@ -1640,20 +1983,20 @@ EXIT:
 }
 
 /** Keypad available output state; assume unknown */
-static cover_state_t kbd_available_state = COVER_UNDEF;
+static cover_state_t keyboard_available_state = COVER_UNDEF;
 
 static void
-tklock_datapipe_keyboard_available_cb(gconstpointer const data)
+tklock_datapipe_keyboard_available_state_cb(gconstpointer const data)
 {
-    cover_state_t prev = kbd_available_state;
-    kbd_available_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = keyboard_available_state;
+    keyboard_available_state = GPOINTER_TO_INT(data);
 
-    if( kbd_available_state == prev )
+    if( keyboard_available_state == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "kbd_available_state = %s -> %s",
+    mce_log(LL_DEBUG, "keyboard_available_state = %s -> %s",
             cover_state_repr(prev),
-            cover_state_repr(kbd_available_state));
+            cover_state_repr(keyboard_available_state));
 
     tklock_dbus_send_keyboard_available_state(0);
 
@@ -1661,22 +2004,22 @@ EXIT:
     return;
 }
 
-/** Cached als poll state; tracked via tklock_datapipe_ambient_light_poll_cb() */
-static gboolean ambient_light_poll = FALSE;
+/** Cached als poll state; tracked via tklock_datapipe_light_sensor_poll_request_cb() */
+static gboolean light_sensor_polling = FALSE;
 
 /** Ambient Light Sensor filter for temporary sensor enable
  *
  * @param data Polling enabled/disabled bool (as void pointer)
  */
 static void
-tklock_datapipe_ambient_light_poll_cb(gconstpointer const data)
+tklock_datapipe_light_sensor_poll_request_cb(gconstpointer const data)
 {
-    gboolean prev = ambient_light_poll;
-    ambient_light_poll = GPOINTER_TO_INT(data) ? TRUE : FALSE;
+    gboolean prev = light_sensor_polling;
+    light_sensor_polling = GPOINTER_TO_INT(data) ? TRUE : FALSE;
 
-    mce_log(LL_DEBUG, "ambient_light_poll: %s -> %s",
+    mce_log(LL_DEBUG, "light_sensor_polling: %s -> %s",
             prev ? "true" : "false",
-            ambient_light_poll ? "true" : "false");
+            light_sensor_polling ? "true" : "false");
 
     /* Check without comparing to previous state. The poll
      * request can be denied by datapipe filter at the als
@@ -1685,21 +2028,41 @@ tklock_datapipe_ambient_light_poll_cb(gconstpointer const data)
     tklock_lidfilter_rethink_als_poll();
 }
 
-/** Raw ambient light sensor state; assume unknown */
-static int ambient_light_sensor_state = -1;
-
-/** Change notifications from ambient_light_sensor_pipe
+/** Change notifications for topmost_window_pid_pipe
  */
-static void tklock_datapipe_ambient_light_sensor_cb(gconstpointer data)
+static void
+tklock_datapipe_topmost_window_pid_cb(gconstpointer data)
 {
-    cover_state_t prev = ambient_light_sensor_state;
-    ambient_light_sensor_state = GPOINTER_TO_INT(data);
+    int prev = topmost_window_pid;
+    topmost_window_pid = GPOINTER_TO_INT(data);
 
-    if( ambient_light_sensor_state == prev )
+    if( prev == topmost_window_pid )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "ambient_light_sensor_state = %d -> %d",
-            prev, ambient_light_sensor_state);
+    mce_log(LL_DEBUG, "topmost_window_pid: %d -> %d",
+            prev, topmost_window_pid);
+
+    tklock_datapipe_rethink_interaction_expected();
+
+EXIT:
+    return;
+}
+
+/** Raw ambient light sensor state; assume unknown */
+static int light_sensor_actual = -1;
+
+/** Change notifications from light_sensor_actual_pipe
+ */
+static void tklock_datapipe_light_sensor_actual_cb(gconstpointer data)
+{
+    cover_state_t prev = light_sensor_actual;
+    light_sensor_actual = GPOINTER_TO_INT(data);
+
+    if( light_sensor_actual == prev )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "light_sensor_actual = %d -> %d",
+            prev, light_sensor_actual);
 
     tklock_lidfilter_rethink_als_state();
 
@@ -1755,36 +2118,34 @@ static void tklock_datapipe_lid_sensor_is_working_cb(gconstpointer data)
                     LID_SENSOR_IS_WORKING_FLAG_FILE);
 
         /* Invalidate sensor data */
-        execute_datapipe(&lid_cover_sensor_pipe,
-                         GINT_TO_POINTER(COVER_UNDEF),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&lid_sensor_actual_pipe,
+                           GINT_TO_POINTER(COVER_UNDEF));
     }
 
 EXIT:
     return;
 }
 
-/** Change notifications from lid_cover_sensor_pipe
+/** Change notifications from lid_sensor_actual_pipe
  */
-static void tklock_datapipe_lid_cover_sensor_cb(gconstpointer data)
+static void tklock_datapipe_lid_sensor_actual_cb(gconstpointer data)
 {
-    cover_state_t prev = lid_cover_sensor_state;
-    lid_cover_sensor_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = lid_sensor_actual;
+    lid_sensor_actual = GPOINTER_TO_INT(data);
 
-    if( lid_cover_sensor_state == prev )
+    if( lid_sensor_actual == prev )
         goto EXIT;
 
-    if( prev == COVER_CLOSED &&  lid_cover_sensor_state == COVER_OPEN ) {
+    if( prev == COVER_CLOSED &&  lid_sensor_actual == COVER_OPEN ) {
         /* We have seen the sensor flip from closed to open position,
          * so we can stop assuming it stays closed forever */
-        execute_datapipe(&lid_sensor_is_working_pipe,
-                         GINT_TO_POINTER(true),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&lid_sensor_is_working_pipe,
+                           GINT_TO_POINTER(true));
     }
 
-    mce_log(LL_DEVEL, "lid_cover_sensor_state = %s -> %s",
+    mce_log(LL_DEVEL, "lid_sensor_actual = %s -> %s",
             cover_state_repr(prev),
-            cover_state_repr(lid_cover_sensor_state));
+            cover_state_repr(lid_sensor_actual));
 
     tklock_lidfilter_rethink_lid_state();
 
@@ -1792,19 +2153,19 @@ EXIT:
     return;
 }
 
-/** Change notifications from lid_cover_policy_pipe
+/** Change notifications from lid_sensor_filtered_pipe
  */
-static void tklock_datapipe_lid_cover_policy_cb(gconstpointer data)
+static void tklock_datapipe_lid_sensor_filtered_cb(gconstpointer data)
 {
-    cover_state_t prev = lid_cover_policy_state;
-    lid_cover_policy_state = GPOINTER_TO_INT(data);
+    cover_state_t prev = lid_sensor_filtered;
+    lid_sensor_filtered = GPOINTER_TO_INT(data);
 
-    if( lid_cover_policy_state == prev )
+    if( lid_sensor_filtered == prev )
         goto EXIT;
 
-    mce_log(LL_DEVEL, "lid_cover_policy_state = %s -> %s",
+    mce_log(LL_DEVEL, "lid_sensor_filtered = %s -> %s",
             cover_state_repr(prev),
-            cover_state_repr(lid_cover_policy_state));
+            cover_state_repr(lid_sensor_filtered));
 
     /* TODO: On devices that have means to detect physically covered
      *       display, it might be desirable to also power off:
@@ -1824,9 +2185,9 @@ EXIT:
 /** Camera lens cover state; assume closed */
 static cover_state_t lens_cover_state = COVER_CLOSED;
 
-/** Change notifications from lens_cover_pipe
+/** Change notifications from lens_cover_state_pipe
  */
-static void tklock_datapipe_lens_cover_cb(gconstpointer data)
+static void tklock_datapipe_lens_cover_state_cb(gconstpointer data)
 {
     cover_state_t prev = lens_cover_state;
     lens_cover_state = GPOINTER_TO_INT(data);
@@ -1901,11 +2262,11 @@ static bool tklock_touch_activity_event_p(const struct input_event *ev)
     return activity;
 }
 
-/** Handle user_activity_pipe notifications
+/** Handle user_activity_event_pipe notifications
  *
  * @param data input_event as void pointer
  */
-static void tklock_datapipe_user_activity_cb(gconstpointer data)
+static void tklock_datapipe_user_activity_event_cb(gconstpointer data)
 {
     static int64_t last_time = 0;
 
@@ -1925,7 +2286,7 @@ static void tklock_datapipe_user_activity_cb(gconstpointer data)
     }
 
     /* Touch events relevant unly when handling notification & linger */
-    if( !(exception_state & (UIEXC_NOTIF | UIEXC_LINGER)) )
+    if( !(uiexception_type & (UIEXCEPTION_TYPE_NOTIF | UIEXCEPTION_TYPE_LINGER)) )
         goto EXIT;
 
     int64_t now = mce_lib_get_boot_tick();
@@ -1940,18 +2301,19 @@ static void tklock_datapipe_user_activity_cb(gconstpointer data)
             evdev_get_event_code_name(ev->type, ev->code),
             ev->value);
 
-    /* N.B. the exception_state is bitmask, but only bit at time is
-     *      visible in the exception_state datapipe */
-    switch( exception_state ) {
-    case UIEXC_LINGER:
+    /* N.B. the uiexception_type is bitmask, but only bit at time is
+     *      visible in the uiexception_type datapipe */
+    switch( uiexception_type ) {
+    case UIEXCEPTION_TYPE_LINGER:
         /* touch events during linger -> do not restore display state */
-        tklock_uiexcept_deny_state_restore(true, "touch event during linger");
+        tklock_uiexception_deny_state_restore(true,
+                                              "touch event during linger");
         break;
 
-    case UIEXC_NOTIF:
+    case UIEXCEPTION_TYPE_NOTIF:
         /* touch events while device is not locked -> do not restore display state */
-        if( tklock_uiexcept_deny_state_restore(false,
-                                               "touch event during notification") ) {
+        if( tklock_uiexception_deny_state_restore(false,
+                                                  "touch event during notification") ) {
             break;
         }
         /* touchscreen activity makes notification exceptions to last longer */
@@ -1967,68 +2329,92 @@ EXIT:
     return;
 }
 
+/** Change notifications for init_done
+ */
+static void tklock_datapipe_init_done_cb(gconstpointer data)
+{
+    tristate_t prev = init_done;
+    init_done = GPOINTER_TO_INT(data);
+
+    if( init_done == prev )
+        goto EXIT;
+
+    mce_log(LL_DEBUG, "init_done = %s -> %s",
+            tristate_repr(prev),
+            tristate_repr(init_done));
+
+    /* No direct actions, but restoring display state
+     * after notifications etc is disabled until init
+     * done is reached. See tklock_uiexception_begin().
+     */
+
+EXIT:
+    return;
+}
+
 /** Array of datapipe handlers */
 static datapipe_handler_t tklock_datapipe_handlers[] =
 {
+    // input filters
+    {
+        .datapipe  = &submode_pipe,
+        .filter_cb = tklock_datapipe_submode_filter_cb,
+    },
     // output triggers
     {
-        .datapipe = &device_resumed_pipe,
-        .output_cb = tklock_datapipe_device_resumed_cb,
+        .datapipe  = &resume_detected_event_pipe,
+        .output_cb = tklock_datapipe_resume_detected_event_cb,
     },
     {
-        .datapipe = &lipstick_available_pipe,
-        .output_cb = tklock_datapipe_lipstick_available_cb,
+        .datapipe  = &lipstick_service_state_pipe,
+        .output_cb = tklock_datapipe_lipstick_service_state_cb,
     },
     {
-        .datapipe  = &devicelock_available_pipe,
-        .output_cb = tklock_datapipe_devicelock_available_cb,
+        .datapipe  = &devicelock_service_state_pipe,
+        .output_cb = tklock_datapipe_devicelock_service_state_cb,
     },
     {
-        .datapipe = &update_mode_pipe,
-        .output_cb = tklock_datapipe_update_mode_cb,
+        .datapipe  = &osupdate_running_pipe,
+        .output_cb = tklock_datapipe_osupdate_running_cb,
     },
     {
-        .datapipe = &shutting_down_pipe,
+        .datapipe  = &shutting_down_pipe,
         .output_cb = tklock_datapipe_shutting_down_cb,
     },
     {
-        .datapipe = &device_lock_state_pipe,
-        .output_cb = tklock_datapipe_device_lock_state_cb,
+        .datapipe  = &devicelock_state_pipe,
+        .output_cb = tklock_datapipe_devicelock_state_cb,
     },
     {
-        .datapipe = &display_state_pipe,
-        .output_cb = tklock_datapipe_display_state_cb,
+        .datapipe  = &display_state_curr_pipe,
+        .output_cb = tklock_datapipe_display_state_curr_cb,
     },
     {
-        .datapipe = &display_state_next_pipe,
+        .datapipe  = &display_state_next_pipe,
         .output_cb = tklock_datapipe_display_state_next_cb,
-    },
-    {
-        .datapipe = &tk_lock_pipe,
-        .output_cb = tklock_datapipe_tk_lock_cb,
     },
     {
         .datapipe  = &interaction_expected_pipe,
         .output_cb = tklock_datapipe_interaction_expected_cb,
     },
     {
-        .datapipe = &proximity_sensor_pipe,
-        .output_cb = tklock_datapipe_proximity_sensor_cb,
+        .datapipe  = &proximity_sensor_actual_pipe,
+        .output_cb = tklock_datapipe_proximity_sensor_actual_cb,
     },
     {
-        .datapipe = &call_state_pipe,
+        .datapipe  = &call_state_pipe,
         .output_cb = tklock_datapipe_call_state_cb,
     },
     {
-        .datapipe = &music_playback_pipe,
-        .output_cb = tklock_datapipe_music_playback_cb,
+        .datapipe  = &music_playback_ongoing_pipe,
+        .output_cb = tklock_datapipe_music_playback_ongoing_cb,
     },
     {
-        .datapipe = &alarm_ui_state_pipe,
+        .datapipe  = &alarm_ui_state_pipe,
         .output_cb = tklock_datapipe_alarm_ui_state_cb,
     },
     {
-        .datapipe = &charger_state_pipe,
+        .datapipe  = &charger_state_pipe,
         .output_cb = tklock_datapipe_charger_state_cb,
     },
     {
@@ -2036,87 +2422,99 @@ static datapipe_handler_t tklock_datapipe_handlers[] =
         .output_cb = tklock_datapipe_battery_status_cb,
     },
     {
-        .datapipe = &exception_state_pipe,
-        .output_cb = tklock_datapipe_exception_state_cb,
+        .datapipe  = &uiexception_type_pipe,
+        .output_cb = tklock_datapipe_uiexception_type_cb,
     },
     {
-        .datapipe = &audio_route_pipe,
+        .datapipe  = &audio_route_pipe,
         .output_cb = tklock_datapipe_audio_route_cb,
     },
     {
-        .datapipe = &system_state_pipe,
+        .datapipe  = &system_state_pipe,
         .output_cb = tklock_datapipe_system_state_cb,
     },
     {
-        .datapipe = &usb_cable_pipe,
-        .output_cb = tklock_datapipe_usb_cable_cb,
+        .datapipe  = &usb_cable_state_pipe,
+        .output_cb = tklock_datapipe_usb_cable_state_cb,
     },
     {
-        .datapipe = &jack_sense_pipe,
-        .output_cb = tklock_datapipe_jack_sense_cb,
+        .datapipe  = &jack_sense_state_pipe,
+        .output_cb = tklock_datapipe_jack_sense_state_cb,
     },
     {
-        .datapipe = &heartbeat_pipe,
-        .output_cb = tklock_datapipe_heartbeat_cb,
+        .datapipe  = &heartbeat_event_pipe,
+        .output_cb = tklock_datapipe_heartbeat_event_cb,
     },
     {
-        .datapipe = &submode_pipe,
+        .datapipe  = &submode_pipe,
         .output_cb = tklock_datapipe_submode_cb,
     },
     {
-        .datapipe = &ambient_light_sensor_pipe,
-        .output_cb = tklock_datapipe_ambient_light_sensor_cb,
+        .datapipe  = &light_sensor_actual_pipe,
+        .output_cb = tklock_datapipe_light_sensor_actual_cb,
     },
     {
         .datapipe  = &lid_sensor_is_working_pipe,
         .output_cb = tklock_datapipe_lid_sensor_is_working_cb,
     },
     {
-        .datapipe = &lid_cover_sensor_pipe,
-        .output_cb = tklock_datapipe_lid_cover_sensor_cb,
+        .datapipe  = &lid_sensor_actual_pipe,
+        .output_cb = tklock_datapipe_lid_sensor_actual_cb,
     },
     {
-        .datapipe = &lid_cover_policy_pipe,
-        .output_cb = tklock_datapipe_lid_cover_policy_cb,
+        .datapipe  = &lid_sensor_filtered_pipe,
+        .output_cb = tklock_datapipe_lid_sensor_filtered_cb,
     },
     {
-        .datapipe = &lens_cover_pipe,
-        .output_cb = tklock_datapipe_lens_cover_cb,
+        .datapipe  = &lens_cover_state_pipe,
+        .output_cb = tklock_datapipe_lens_cover_state_cb,
     },
     {
-        .datapipe = &user_activity_pipe,
-        .output_cb = tklock_datapipe_user_activity_cb,
+        .datapipe  = &user_activity_event_pipe,
+        .output_cb = tklock_datapipe_user_activity_event_cb,
 
+    },
+    {
+        .datapipe  = &init_done_pipe,
+        .output_cb = tklock_datapipe_init_done_cb,
     },
     {
         /* Note: Keybaord slide state signaling must reflect
          *       the actual state -> uses output triggering
          *       unlike the display state logic that is bound
          *       to datapipe input. */
-        .datapipe  = &keyboard_slide_pipe,
-        .output_cb = tklock_datapipe_keyboard_slide_output_cb,
+        .datapipe  = &keyboard_slide_state_pipe,
+        .output_cb = tklock_datapipe_keyboard_slide_output_state_cb,
     },
     {
-        .datapipe  = &keyboard_available_pipe,
-        .output_cb = tklock_datapipe_keyboard_available_cb,
+        .datapipe  = &keyboard_available_state_pipe,
+        .output_cb = tklock_datapipe_keyboard_available_state_cb,
     },
     {
-        .datapipe  = &ambient_light_poll_pipe,
-        .output_cb = tklock_datapipe_ambient_light_poll_cb,
+        .datapipe  = &light_sensor_poll_request_pipe,
+        .output_cb = tklock_datapipe_light_sensor_poll_request_cb,
+    },
+    {
+        .datapipe  = &topmost_window_pid_pipe,
+        .output_cb = tklock_datapipe_topmost_window_pid_cb,
     },
 
     // input triggers
     {
-        .datapipe = &keypress_pipe,
-        .input_cb = tklock_datapipe_keypress_cb,
+        .datapipe = &tklock_request_pipe,
+        .input_cb = tklock_datapipe_tklock_request_cb,
     },
     {
-        .datapipe = &lockkey_pipe,
-        .input_cb = tklock_datapipe_lockkey_cb,
+        .datapipe = &keypress_event_pipe,
+        .input_cb = tklock_datapipe_keypress_event_cb,
     },
     {
-        .datapipe = &camera_button_pipe,
-        .input_cb = tklock_datapipe_camera_button_cb,
+        .datapipe = &lockkey_state_pipe,
+        .input_cb = tklock_datapipe_lockkey_state_cb,
+    },
+    {
+        .datapipe = &camera_button_state_pipe,
+        .input_cb = tklock_datapipe_camera_button_state_cb,
     },
     {
         /* Note: Logically we should use output trigger for keyboard slide,
@@ -2124,8 +2522,8 @@ static datapipe_handler_t tklock_datapipe_handlers[] =
          *       on if mce happens to restart while keyboard is open.
          *       As long as the slide input is not filtered, there is
          *       no harm in this. */
-        .datapipe = &keyboard_slide_pipe,
-        .input_cb = tklock_datapipe_keyboard_slide_input_cb,
+        .datapipe = &keyboard_slide_state_pipe,
+        .input_cb = tklock_datapipe_keyboard_slide_input_state_cb,
     },
 
     // sentinel
@@ -2136,7 +2534,7 @@ static datapipe_handler_t tklock_datapipe_handlers[] =
 
 static datapipe_bindings_t tklock_datapipe_bindings =
 {
-    .module   = "tklock",
+    .module   = MODULE_NAME,
     .handlers = tklock_datapipe_handlers,
 };
 
@@ -2144,14 +2542,14 @@ static datapipe_bindings_t tklock_datapipe_bindings =
  */
 static void tklock_datapipe_init(void)
 {
-    datapipe_bindings_init(&tklock_datapipe_bindings);
+    mce_datapipe_init_bindings(&tklock_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes
  */
 static void tklock_datapipe_quit(void)
 {
-    datapipe_bindings_quit(&tklock_datapipe_bindings);
+    mce_datapipe_quit_bindings(&tklock_datapipe_bindings);
 }
 
 /* ========================================================================= *
@@ -2184,7 +2582,7 @@ static void tklock_autolock_on_devlock_prime(void)
     const int autolock_limit = 60 * 1000;
 
     /* Do nothing during startup */
-    if( display_state == MCE_DISPLAY_UNDEF )
+    if( display_state_curr == MCE_DISPLAY_UNDEF )
         goto EXIT;
 
     /* Unprime if we are going to powered off state */
@@ -2201,7 +2599,7 @@ static void tklock_autolock_on_devlock_prime(void)
     }
 
     /* Prime if we are coming from powered off state */
-    switch( display_state ) {
+    switch( display_state_curr ) {
     case MCE_DISPLAY_DIM:
     case MCE_DISPLAY_ON:
         break;
@@ -2221,13 +2619,13 @@ EXIT:
 static void tklock_autolock_on_devlock_trigger(void)
 {
     /* Device lock must be active */
-    if( device_lock_state != DEVICE_LOCK_LOCKED )
+    if( devicelock_state != DEVICELOCK_STATE_LOCKED )
         goto EXIT;
 
     /* Not while handling calls or alarms */
-    switch( exception_state ) {
-    case UIEXC_CALL:
-    case UIEXC_ALARM:
+    switch( uiexception_type ) {
+    case UIEXCEPTION_TYPE_CALL:
+    case UIEXCEPTION_TYPE_ALARM:
         goto EXIT;
 
     default:
@@ -2262,9 +2660,7 @@ static void tklock_autolock_on_devlock_trigger(void)
      */
 
     mce_log(LL_DEBUG, "autolock after devicelock: triggered");
-    execute_datapipe(&tk_lock_pipe,
-                     GINT_TO_POINTER(LOCK_ON),
-                     USE_INDATA, CACHE_INDATA);
+    mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
 EXIT:
     return;
 }
@@ -2300,9 +2696,8 @@ static void tklock_lidsensor_init(void)
             tklock_lid_sensor_is_working ? "true" : "false");
 
     /* Broadcast initial state */
-    execute_datapipe(&lid_sensor_is_working_pipe,
-                     GINT_TO_POINTER(tklock_lid_sensor_is_working),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&lid_sensor_is_working_pipe,
+                       GINT_TO_POINTER(tklock_lid_sensor_is_working));
 }
 
 /* ========================================================================= *
@@ -2357,7 +2752,7 @@ static tklock_lidlight_t tklock_lidlight_from_lux(int lux)
  */
 static tklock_lidlight_t tklock_lidfilter_map_als_state(void)
 {
-    return tklock_lidlight_from_lux(ambient_light_sensor_state);
+    return tklock_lidlight_from_lux(light_sensor_actual);
 }
 
 /** Predicate for: ALS data is used for filtering Lid sensor state
@@ -2430,9 +2825,8 @@ static gboolean tklock_lidfilter_wait_for_close_cb(gpointer aptr)
     tklock_lidfilter_set_allow_close(false);
 
     /* Invalidate sensor data */
-    execute_datapipe(&lid_cover_sensor_pipe,
-                     GINT_TO_POINTER(COVER_UNDEF),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&lid_sensor_actual_pipe,
+                       GINT_TO_POINTER(COVER_UNDEF));
 
 EXIT:
     return FALSE;
@@ -2457,7 +2851,7 @@ static bool tklock_lidfilter_get_wait_for_close(void)
  */
 static void tklock_lidfilter_set_wait_for_close(bool state)
 {
-    if( lid_cover_sensor_state != COVER_OPEN )
+    if( lid_sensor_actual != COVER_OPEN )
         state = false;
 
     if( display_state_next != MCE_DISPLAY_ON &&
@@ -2502,9 +2896,8 @@ static gboolean tklock_lidfilter_wait_for_dark_cb(gpointer aptr)
     tklock_lidfilter_set_als_state(TKLOCK_LIDLIGHT_NA);
 
     /* Invalidate sensor data */
-    execute_datapipe(&lid_cover_sensor_pipe,
-                     GINT_TO_POINTER(COVER_UNDEF),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&lid_sensor_actual_pipe,
+                       GINT_TO_POINTER(COVER_UNDEF));
 
 EXIT:
     return FALSE;
@@ -2619,7 +3012,7 @@ EXIT:
 static void tklock_lidfilter_rethink_als_poll(void)
 {
     // when als polling stops, we must stop waiting for light level
-    if( !ambient_light_poll ) {
+    if( !light_sensor_polling ) {
         tklock_lidfilter_set_wait_for_light(false);
         tklock_lidfilter_rethink_als_state();
     }
@@ -2629,7 +3022,7 @@ static void tklock_lidfilter_rethink_als_poll(void)
  */
 static void tklock_lidfilter_rethink_allow_close(void)
 {
-    switch( display_state ) {
+    switch( display_state_curr ) {
     case MCE_DISPLAY_POWER_UP:
       /* After display power cycling we  need to see a high lux value
        * before lid close can be used for display blanking again. */
@@ -2638,11 +3031,10 @@ static void tklock_lidfilter_rethink_allow_close(void)
       /* Display power up while sensor is in closed state. Assume this
        * is due to user pressing power key and ignore the lid sensor
        * state until further changes are received. */
-      if( lid_cover_sensor_state == COVER_CLOSED ) {
+      if( lid_sensor_actual == COVER_CLOSED ) {
           mce_log(LL_DEVEL, "unblank while lid closed; ignore lid");
-          execute_datapipe(&lid_cover_sensor_pipe,
-                         GINT_TO_POINTER(COVER_UNDEF),
-                         USE_INDATA, CACHE_INDATA);
+          datapipe_exec_full(&lid_sensor_actual_pipe,
+                             GINT_TO_POINTER(COVER_UNDEF));
       }
       break;
 
@@ -2670,13 +3062,12 @@ static void tklock_lidfilter_rethink_lid_state(void)
     }
 
     /* Keep ALS powered up for a while after lid state change */
-    if( lid_cover_sensor_state != COVER_UNDEF ) {
-        execute_datapipe(&ambient_light_poll_pipe,
-                         GINT_TO_POINTER(TRUE),
-                         USE_INDATA, CACHE_OUTDATA);
+    if( lid_sensor_actual != COVER_UNDEF ) {
+        datapipe_exec_full(&light_sensor_poll_request_pipe,
+                           GINT_TO_POINTER(TRUE));
     }
 
-    switch( lid_cover_sensor_state ) {
+    switch( lid_sensor_actual ) {
     case COVER_OPEN:
         tklock_lidfilter_set_wait_for_dark(false);
         tklock_lidfilter_set_wait_for_light(true);
@@ -2747,7 +3138,7 @@ static void tklock_lidfilter_rethink_als_state(void)
                  * seen high light value, but rise in level means
                  * the sensor is up and sees light -> we can stop
                  * waiting */
-                if( prev < ambient_light_sensor_state )
+                if( prev < light_sensor_actual )
                     tklock_lidfilter_set_als_state(TKLOCK_LIDLIGHT_HI);
                 else
                     tklock_lidfilter_set_als_state(TKLOCK_LIDLIGHT_NA);
@@ -2763,8 +3154,8 @@ static void tklock_lidfilter_rethink_als_state(void)
     }
 
     /* Update previous value unless ALS is powered down */
-    if( ambient_light_sensor_state >= 0 )
-        prev = ambient_light_sensor_state;
+    if( light_sensor_actual >= 0 )
+        prev = light_sensor_actual;
 
     tklock_lidpolicy_rethink();
 }
@@ -2790,6 +3181,9 @@ static void tklock_lidfilter_rethink_als_state(void)
  */
 static void tklock_lidpolicy_rethink(void)
 {
+    /* We have not seen COVER_CLOSED state yet */
+    static bool lid_has_been_closed = false;
+
     /* Assume lid is neither open nor closed */
     cover_state_t action = COVER_UNDEF;
 
@@ -2803,45 +3197,50 @@ static void tklock_lidpolicy_rethink(void)
     else if( !tklock_lidfilter_is_enabled() )
     {
         /* No filtering -> use sensor state as is */
-        action = lid_cover_sensor_state;
+        action = lid_sensor_actual;
     }
-    else if( lid_cover_sensor_state == COVER_CLOSED &&
+    else if( lid_sensor_actual == COVER_CLOSED &&
         tklock_lidfilter_als_state == TKLOCK_LIDLIGHT_LO ) {
         if( tklock_lidfilter_allow_close )
             action = COVER_CLOSED;
     }
-    else if( lid_cover_sensor_state == COVER_OPEN &&
+    else if( lid_sensor_actual == COVER_OPEN &&
              tklock_lidfilter_als_state == TKLOCK_LIDLIGHT_HI ) {
         action = COVER_OPEN;
     }
 
+    /* To avoid unblanking on mce restart while lid is open, stay in
+     * undecided state until we have observed lid closed state too. */
+    if( action == COVER_OPEN && !lid_has_been_closed )
+        action = COVER_UNDEF;
+
     /* Skip the rest if there is no change */
-    if( lid_cover_policy_state == action )
+    if( lid_sensor_filtered == action )
         goto EXIT;
 
     mce_log(LL_DEBUG, "lid policy: %s -> %s",
-            cover_state_repr(lid_cover_policy_state),
+            cover_state_repr(lid_sensor_filtered),
             cover_state_repr(action));
 
     /* First make the policy decision known */
-    execute_datapipe(&lid_cover_policy_pipe,
-                     GINT_TO_POINTER(action),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&lid_sensor_filtered_pipe,
+                       GINT_TO_POINTER(action));
 
     /* Then execute the required actions */
     switch( action ) {
     case COVER_CLOSED:
+        /* Allow unblanking when lid is opened again. */
+        lid_has_been_closed = true;
+
         /* Blank display + lock ui */
         if( tklock_lid_close_actions != LID_CLOSE_ACTION_DISABLED ) {
             mce_log(LL_DEVEL, "lid closed - blank");
-            mce_datapipe_req_display_state(MCE_DISPLAY_OFF);
+            mce_datapipe_request_display_state(MCE_DISPLAY_OFF);
         }
 
         if( tklock_lid_close_actions == LID_CLOSE_ACTION_TKLOCK ) {
             mce_log(LL_DEBUG, "lid closed - tklock");
-            execute_datapipe(&tk_lock_pipe,
-                             GINT_TO_POINTER(LOCK_ON),
-                             USE_INDATA, CACHE_INDATA);
+            mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
         }
         break;
 
@@ -2849,14 +3248,12 @@ static void tklock_lidpolicy_rethink(void)
         /* Unblank display + unlock ui */
         if( tklock_lid_open_actions != LID_OPEN_ACTION_DISABLED ) {
             mce_log(LL_DEVEL, "lid open - unblank");
-            mce_datapipe_req_display_state(MCE_DISPLAY_ON);
+            mce_datapipe_request_display_state(MCE_DISPLAY_ON);
         }
 
         if( tklock_lid_open_actions == LID_OPEN_ACTION_TKUNLOCK ) {
             mce_log(LL_DEBUG, "lid open - untklock");
-            execute_datapipe(&tk_lock_pipe,
-                             GINT_TO_POINTER(LOCK_OFF),
-                             USE_INDATA, CACHE_INDATA);
+            mce_datapipe_request_tklock(TKLOCK_REQUEST_OFF);
         }
         break;
 
@@ -2903,8 +3300,8 @@ static void tklock_keyboard_slide_opened(void)
         break;
 
     case KBD_OPEN_TRIGGER_NO_PROXIMITY:
-        if( proximity_state_actual == COVER_CLOSED ||
-            lid_cover_policy_state == COVER_CLOSED )
+        if( proximity_sensor_actual != COVER_OPEN ||
+            lid_sensor_filtered == COVER_CLOSED )
             goto EXIT;
         break;
     }
@@ -2912,14 +3309,12 @@ static void tklock_keyboard_slide_opened(void)
     /* Check what actions are wanted */
     if( tklock_kbd_open_actions != LID_OPEN_ACTION_DISABLED ) {
         mce_log(LL_DEVEL, "kbd slide open - unblank");
-        mce_datapipe_req_display_state(MCE_DISPLAY_ON);
+        mce_datapipe_request_display_state(MCE_DISPLAY_ON);
     }
 
     if( tklock_kbd_open_actions == LID_OPEN_ACTION_TKUNLOCK ) {
         mce_log(LL_DEBUG, "kbd slide open - untklock");
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_OFF),
-                         USE_INDATA, CACHE_INDATA);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_OFF);
     }
 
     /* Mark down we unblanked due to keyboard open */
@@ -2930,10 +3325,24 @@ EXIT:
     return;
 }
 
+/** Wait for proximity sensor -callback for keyboard slide handling
+ *
+ * @param aptr unused
+ */
+static void tklock_keyboard_slide_opened_cb(gpointer aptr)
+{
+    (void)aptr;
+
+    /* Slide still open? */
+    if( keyboard_slide_input_state == COVER_OPEN ) {
+        tklock_keyboard_slide_opened();
+    }
+}
+
 static void tklock_keyboard_slide_closed(void)
 {
     /* Must not blank during active alarms / calls */
-    if( exception_state & (UIEXC_CALL | UIEXC_ALARM) )
+    if( uiexception_type & (UIEXCEPTION_TYPE_CALL | UIEXCEPTION_TYPE_ALARM) )
         goto EXIT;
 
     /* Check if actions are wanted */
@@ -2957,14 +3366,12 @@ static void tklock_keyboard_slide_closed(void)
     /* Check what actions are wanted */
     if( tklock_kbd_close_actions != LID_CLOSE_ACTION_DISABLED ) {
         mce_log(LL_DEVEL, "kbd slide closed - blank");
-        mce_datapipe_req_display_state(MCE_DISPLAY_OFF);
+        mce_datapipe_request_display_state(MCE_DISPLAY_OFF);
     }
 
     if( tklock_kbd_close_actions == LID_CLOSE_ACTION_TKLOCK ) {
         mce_log(LL_DEBUG, "kbd slide closed - tklock");
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_ON),
-                         USE_INDATA, CACHE_INDATA);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
     }
 
 EXIT:
@@ -2979,9 +3386,11 @@ EXIT:
 
 static void tklock_keyboard_slide_rethink(void)
 {
-    switch( kbd_slide_input_state ) {
+    switch( keyboard_slide_input_state ) {
     case COVER_OPEN:
-        tklock_keyboard_slide_opened();
+        /* Delay processing until proximity sensor state is known */
+        common_on_proximity_schedule(MODULE_NAME,
+                                     tklock_keyboard_slide_opened_cb, 0);
         break;
 
     case COVER_CLOSED:
@@ -3009,11 +3418,11 @@ static mce_hbtimer_t *tklock_autolock_timer = 0;
 static void tklock_autolock_evaluate(void)
 {
     // display must be currently off
-    if( display_state != MCE_DISPLAY_OFF )
+    if( display_state_curr != MCE_DISPLAY_OFF )
         goto EXIT;
 
     // tklock unset
-    if( submode & MCE_TKLOCK_SUBMODE )
+    if( tklock_datapipe_in_tklock_submode() )
         goto EXIT;
 
     // autolocking enabled
@@ -3021,11 +3430,11 @@ static void tklock_autolock_evaluate(void)
         goto EXIT;
 
     // not handling calls, alarms, etc
-    if( exception_state != UIEXC_NONE )
+    if( uiexception_type != UIEXCEPTION_TYPE_NONE )
         goto EXIT;
 
     // if device lock is on, apply tklock immediately
-    if( device_lock_state == DEVICE_LOCK_LOCKED )
+    if( devicelock_state == DEVICELOCK_STATE_LOCKED )
         goto LOCK;
 
     // autolock delay to passed
@@ -3034,7 +3443,7 @@ static void tklock_autolock_evaluate(void)
 
 LOCK:
     mce_log(LL_DEBUG, "autolock applied");
-    tklock_ui_set(true);
+    tklock_ui_set_enabled(true);
 
 EXIT:
     return;
@@ -3090,7 +3499,7 @@ static void tklock_autolock_rethink(void)
         // not in OFF or moving away from OFF
         tklock_autolock_disable();
     }
-    else if( display_state_next != display_state ) {
+    else if( display_state_next != display_state_curr ) {
         // making transition to OFF
         tklock_autolock_enable();
     }
@@ -3124,6 +3533,9 @@ tklock_autolock_quit(void)
  * 3) we are not handling call/alarm/etc
  * ========================================================================= */
 
+/** Proximity sensor on-demand tag for proximity locking purposes */
+#define PROXLOC_ON_DEMAND_TAG "proxlock"
+
 /** Delay for enabling tklock from display off when proximity is covered */
 #define PROXLOC_DELAY_MS (3000)
 
@@ -3133,19 +3545,19 @@ static guint   tklock_proxlock_id   = 0;
 static void tklock_proxlock_evaluate(void)
 {
     // display must be currently off
-    if( display_state != MCE_DISPLAY_OFF )
+    if( display_state_curr != MCE_DISPLAY_OFF )
         goto EXIT;
 
     // tklock unset
-    if( submode & MCE_TKLOCK_SUBMODE )
+    if( tklock_datapipe_in_tklock_submode() )
         goto EXIT;
 
     // proximity covered
-    if( proximity_state_effective != COVER_CLOSED )
+    if( proximity_sensor_effective != COVER_CLOSED )
         goto EXIT;
 
     // not handling call, alarm, etc
-    if( exception_state != UIEXC_NONE )
+    if( uiexception_type != UIEXCEPTION_TYPE_NONE )
         goto EXIT;
 
     // proximity lock delay passed
@@ -3154,7 +3566,7 @@ static void tklock_proxlock_evaluate(void)
 
     // lock
     mce_log(LL_DEBUG, "proxlock applied");
-    tklock_ui_set(true);
+    tklock_ui_set_enabled(true);
 
 EXIT:
     return;
@@ -3170,6 +3582,12 @@ static gboolean tklock_proxlock_cb(gpointer aptr)
 
         mce_log(LL_DEBUG, "proxlock timer triggered");
         tklock_proxlock_evaluate();
+
+        /* Timer did not get re-activated, ps not needed anymore */
+        if( !tklock_proxlock_id )
+            datapipe_exec_full(&proximity_sensor_required_pipe,
+                               PROXIMITY_SENSOR_REQUIRED_REM
+                               PROXLOC_ON_DEMAND_TAG);
     }
     return false;
 }
@@ -3181,6 +3599,11 @@ static void tklock_proxlock_disable(void)
     if( tklock_proxlock_id ) {
         g_source_remove(tklock_proxlock_id), tklock_proxlock_id = 0;
         mce_log(LL_DEBUG, "proxlock timer stopped");
+
+        /* Timer canceled, ps not needed anymore */
+        datapipe_exec_full(&proximity_sensor_required_pipe,
+                           PROXIMITY_SENSOR_REQUIRED_REM
+                           PROXLOC_ON_DEMAND_TAG);
     }
 }
 
@@ -3192,6 +3615,10 @@ static void tklock_proxlock_enable(void)
         tklock_proxlock_tick = mce_lib_get_boot_tick() + delay;
         tklock_proxlock_id = g_timeout_add(delay, tklock_proxlock_cb, 0);
         mce_log(LL_DEBUG, "proxlock timer started (%d ms)", delay);
+        /* Timer started, ps is needed */
+        datapipe_exec_full(&proximity_sensor_required_pipe,
+                           PROXIMITY_SENSOR_REQUIRED_ADD
+                           PROXLOC_ON_DEMAND_TAG);
     }
 }
 
@@ -3219,6 +3646,12 @@ static void tklock_proxlock_resume(void)
         tklock_proxlock_id = g_timeout_add(delay, tklock_proxlock_cb, 0);
     }
 
+    /* Timer canceled, ps not needed anymore */
+    if( !tklock_proxlock_id )
+        datapipe_exec_full(&proximity_sensor_required_pipe,
+                           PROXIMITY_SENSOR_REQUIRED_REM
+                           PROXLOC_ON_DEMAND_TAG);
+
 EXIT:
     return;
 }
@@ -3229,7 +3662,7 @@ static void tklock_proxlock_rethink(void)
         // not in OFF or moving away from OFF
         tklock_proxlock_disable();
     }
-    else if( display_state_next != display_state ) {
+    else if( display_state_next != display_state_curr ) {
         // making transition to OFF
         tklock_proxlock_enable();
     }
@@ -3245,11 +3678,11 @@ static void tklock_proxlock_rethink(void)
 
 typedef struct
 {
-    uiexctype_t         mask;
-    uiexctype_t         last;
+    uiexception_type_t mask;
+    uiexception_type_t last;
     display_state_t     display;
     bool                tklock;
-    device_lock_state_t devicelock;
+    devicelock_state_t devicelock;
     bool                insync;
     bool                restore;
     bool                was_called;
@@ -3261,11 +3694,11 @@ typedef struct
 
 static exception_t exdata =
 {
-    .mask        = UIEXC_NONE,
-    .last        = UIEXC_NONE,
+    .mask        = UIEXCEPTION_TYPE_NONE,
+    .last        = UIEXCEPTION_TYPE_NONE,
     .display     = MCE_DISPLAY_UNDEF,
     .tklock      = false,
-    .devicelock  = DEVICE_LOCK_UNDEFINED,
+    .devicelock  = DEVICELOCK_STATE_UNDEFINED,
     .insync      = true,
     .restore     = true,
     .was_called  = false,
@@ -3275,7 +3708,7 @@ static exception_t exdata =
     .notif_id    = 0,
 };
 
-static uiexctype_t topmost_active(uiexctype_t mask)
+static uiexception_type_t topmost_active(uiexception_type_t mask)
 {
     /* Assume UI side priority is:
      * 1. notification dialogs
@@ -3284,12 +3717,12 @@ static uiexctype_t topmost_active(uiexctype_t mask)
      * 4. rest
      */
 
-    static const uiexctype_t pri[] = {
-        UIEXC_NOTIF,
-        UIEXC_ALARM,
-        UIEXC_CALL,
-        UIEXC_LINGER,
-        UIEXC_NOANIM,
+    static const uiexception_type_t pri[] = {
+        UIEXCEPTION_TYPE_NOTIF,
+        UIEXCEPTION_TYPE_ALARM,
+        UIEXCEPTION_TYPE_CALL,
+        UIEXCEPTION_TYPE_LINGER,
+        UIEXCEPTION_TYPE_NOANIM,
         0
     };
 
@@ -3298,18 +3731,17 @@ static uiexctype_t topmost_active(uiexctype_t mask)
             return pri[i];
     }
 
-    return UIEXC_NONE;
+    return UIEXCEPTION_TYPE_NONE;
 }
 
-static void  tklock_uiexcept_sync_to_datapipe(void)
+static void  tklock_uiexception_sync_to_datapipe(void)
 {
-    uiexctype_t in_pipe = datapipe_get_gint(exception_state_pipe);
-    uiexctype_t active  = topmost_active(exdata.mask);
+    uiexception_type_t in_pipe = datapipe_get_gint(uiexception_type_pipe);
+    uiexception_type_t active  = topmost_active(exdata.mask);
 
     if( in_pipe != active ) {
-        execute_datapipe(&exception_state_pipe,
-                         GINT_TO_POINTER(active),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&uiexception_type_pipe,
+                           GINT_TO_POINTER(active));
     }
 }
 
@@ -3319,7 +3751,7 @@ static void  tklock_uiexcept_sync_to_datapipe(void)
  *               false for canceling only if neither tklock nor devicelock
  *               is active
  */
-static bool tklock_uiexcept_deny_state_restore(bool force, const char *cause)
+static bool tklock_uiexception_deny_state_restore(bool force, const char *cause)
 {
     bool changed = false;
 
@@ -3340,22 +3772,21 @@ EXIT:
     return changed;
 }
 
-static void tklock_uiexcept_rethink(void)
+static void tklock_uiexception_rethink(void)
 {
     static display_state_t display_prev = MCE_DISPLAY_UNDEF;
     static call_state_t call_state_prev = CALL_STATE_INVALID;
-    static uiexctype_t active_prev = UIEXC_NONE;
+    static uiexception_type_t active_prev = UIEXCEPTION_TYPE_NONE;
 
-    bool        activate = false;
-    bool        blank    = false;
-    uiexctype_t active   = topmost_active(exdata.mask);
-
-    bool        proximity_blank = false;
+    bool                activate        = false;
+    bool                blank           = false;
+    uiexception_type_t active          = topmost_active(exdata.mask);
+    bool                proximity_blank = false;
 
     /* Make sure "proximityblanking" state gets cleared if display
      * changes to non-off state. */
-    if( display_prev != display_state ) {
-        switch( display_state ) {
+    if( display_prev != display_state_curr ) {
+        switch( display_state_curr ) {
         case MCE_DISPLAY_OFF:
         case MCE_DISPLAY_POWER_DOWN:
             break;
@@ -3367,22 +3798,21 @@ static void tklock_uiexcept_rethink(void)
         case MCE_DISPLAY_LPM_OFF:
         case MCE_DISPLAY_LPM_ON:
         case MCE_DISPLAY_POWER_UP:
-            execute_datapipe(&proximity_blank_pipe,
-                             GINT_TO_POINTER(false),
-                             USE_INDATA, CACHE_INDATA);
+            datapipe_exec_full(&proximity_blanked_pipe,
+                               GINT_TO_POINTER(false));
             break;
         }
     }
 
     if( !active ) {
-        mce_log(LL_DEBUG, "UIEXC_NONE");
+        mce_log(LL_DEBUG, "UIEXCEPTION_TYPE_NONE");
         goto EXIT;
     }
 
     /* Track states that have gotten topmost before linger */
-    if( active != UIEXC_LINGER )
-        exdata.last  = UIEXC_NONE;
-    else if( active_prev != UIEXC_LINGER )
+    if( active != UIEXCEPTION_TYPE_LINGER )
+        exdata.last  = UIEXCEPTION_TYPE_NONE;
+    else if( active_prev != UIEXCEPTION_TYPE_LINGER )
         exdata.last  = active_prev;
 
     /* Special case: tklock changes during incoming calls */
@@ -3403,7 +3833,7 @@ static void tklock_uiexcept_rethink(void)
         case CALL_STATE_NONE:
             /* Start paying attention to tklock changes again if it gets
              * restored after all calls have ended */
-            if( exdata.was_called && tklock_datapipe_have_tklock_submode() ) {
+            if( exdata.was_called && tklock_datapipe_in_tklock_submode() ) {
                 mce_log(LL_NOTICE, "stopping to ignore tklock removal");
                 exdata.was_called = false;
             }
@@ -3415,7 +3845,7 @@ static void tklock_uiexcept_rethink(void)
     }
 
     /* Canceling state restore due to tklock changes */
-    if( tklock_datapipe_have_tklock_submode() ) {
+    if( tklock_datapipe_in_tklock_submode() ) {
         // getting locked does not cancel state restore
         exdata.tklock = true;
     }
@@ -3426,11 +3856,11 @@ static void tklock_uiexcept_rethink(void)
     }
 
     /* Canceling state restore due to device lock changes */
-    if( device_lock_state == DEVICE_LOCK_LOCKED ) {
+    if( devicelock_state == DEVICELOCK_STATE_LOCKED ) {
         // getting locked does not cancel state restore
-        exdata.devicelock = device_lock_state;
+        exdata.devicelock = devicelock_state;
     }
-    else if( exdata.devicelock != device_lock_state && exdata.restore ) {
+    else if( exdata.devicelock != devicelock_state && exdata.restore ) {
         // but getting unlocked  does
         mce_log(LL_NOTICE, "DISABLING STATE RESTORE; devicelock out of sync");
         exdata.restore = false;
@@ -3446,11 +3876,11 @@ static void tklock_uiexcept_rethink(void)
     }
 
     // re-sync on display on transition
-    if( display_prev != display_state ) {
+    if( display_prev != display_state_curr ) {
         mce_log(LL_DEBUG, "display state: %s -> %s",
                 display_state_repr(display_prev),
-                display_state_repr(display_state));
-        if( display_state == MCE_DISPLAY_ON ) {
+                display_state_repr(display_state_curr));
+        if( display_state_curr == MCE_DISPLAY_ON ) {
             if( !exdata.insync )
                 mce_log(LL_NOTICE, "display unblanked; assuming in sync again");
             exdata.insync = true;
@@ -3466,7 +3896,7 @@ static void tklock_uiexcept_rethink(void)
     }
 
     switch( active ) {
-    case UIEXC_NOANIM:
+    case UIEXCEPTION_TYPE_NOANIM:
         /* The noanim exception is used only during display power up.
          * It also has the lowest priority, which means that if it
          * ever gets on top of the exception stack, we need to disable
@@ -3477,18 +3907,18 @@ static void tklock_uiexcept_rethink(void)
         }
         break;
 
-    case UIEXC_NOTIF:
-        mce_log(LL_DEBUG, "UIEXC_NOTIF");
+    case UIEXCEPTION_TYPE_NOTIF:
+        mce_log(LL_DEBUG, "UIEXCEPTION_TYPE_NOTIF");
         activate = true;
         break;
 
-    case UIEXC_ALARM:
-        mce_log(LL_DEBUG, "UIEXC_ALARM");
+    case UIEXCEPTION_TYPE_ALARM:
+        mce_log(LL_DEBUG, "UIEXCEPTION_TYPE_ALARM");
         activate = true;
         break;
 
-    case UIEXC_CALL:
-        mce_log(LL_DEBUG, "UIEXC_CALL");
+    case UIEXCEPTION_TYPE_CALL:
+        mce_log(LL_DEBUG, "UIEXCEPTION_TYPE_CALL");
         if( call_state == CALL_STATE_RINGING ) {
             mce_log(LL_DEBUG, "call=RINGING; activate");
             activate = true;
@@ -3497,7 +3927,7 @@ static void tklock_uiexcept_rethink(void)
             mce_log(LL_DEBUG, "audio!=HANDSET; activate");
             activate = true;
         }
-        else if( proximity_state_effective == COVER_CLOSED ) {
+        else if( proximity_sensor_effective == COVER_CLOSED ) {
             mce_log(LL_DEBUG, "proximity=COVERED; blank");
             /* blanking due to proximity sensor */
             blank = proximity_blank = true;
@@ -3508,12 +3938,12 @@ static void tklock_uiexcept_rethink(void)
         }
         break;
 
-    case UIEXC_LINGER:
-        mce_log(LL_DEBUG, "UIEXC_LINGER");
+    case UIEXCEPTION_TYPE_LINGER:
+        mce_log(LL_DEBUG, "UIEXCEPTION_TYPE_LINGER");
         activate = true;
         break;
 
-    case UIEXC_NONE:
+    case UIEXCEPTION_TYPE_NONE:
         // we should not get here
         break;
 
@@ -3527,18 +3957,17 @@ static void tklock_uiexcept_rethink(void)
     mce_log(LL_DEBUG, "blank=%d, activate=%d", blank, activate);
 
     if( blank ) {
-        if( display_state != MCE_DISPLAY_OFF ) {
+        if( display_state_curr != MCE_DISPLAY_OFF ) {
             /* expose blanking due to proximity via datapipe */
             if( proximity_blank ) {
                 mce_log(LL_DEVEL, "display proximity blank");
-                execute_datapipe(&proximity_blank_pipe,
-                                 GINT_TO_POINTER(true),
-                                 USE_INDATA, CACHE_INDATA);
+                datapipe_exec_full(&proximity_blanked_pipe,
+                                   GINT_TO_POINTER(true));
             }
             else {
                 mce_log(LL_DEBUG, "display blank");
             }
-            mce_datapipe_req_display_state(MCE_DISPLAY_OFF);
+            mce_datapipe_request_display_state(MCE_DISPLAY_OFF);
         }
         else {
             mce_log(LL_DEBUG, "display already blanked");
@@ -3546,7 +3975,7 @@ static void tklock_uiexcept_rethink(void)
     }
     else if( activate ) {
         if( display_prev == MCE_DISPLAY_ON &&
-            display_state != MCE_DISPLAY_ON ) {
+            display_state_curr != MCE_DISPLAY_ON ) {
             /* Assume: dim/blank timer took over the blanking.
              * Disable this state machine until display gets
              * turned back on */
@@ -3555,7 +3984,7 @@ static void tklock_uiexcept_rethink(void)
 
             /* Disable state restore, unless we went out of
              * sync during call ui handling */
-            if( exdata.restore && active != UIEXC_CALL ) {
+            if( exdata.restore && active != UIEXCEPTION_TYPE_CALL ) {
                 exdata.restore = false;
                 mce_log(LL_NOTICE, "DISABLING STATE RESTORE; display out of sync");
             }
@@ -3563,33 +3992,32 @@ static void tklock_uiexcept_rethink(void)
         else if( !exdata.insync ) {
             mce_log(LL_NOTICE, "NOT UNBLANKING; still out of sync");
         }
-        else if( lid_cover_policy_state == COVER_CLOSED ) {
+        else if( lid_sensor_filtered == COVER_CLOSED ) {
             mce_log(LL_NOTICE, "NOT UNBLANKING; lid covered");
         }
-        else if( proximity_state_effective == COVER_CLOSED ) {
+        else if( proximity_sensor_effective != COVER_OPEN ) {
             mce_log(LL_NOTICE, "NOT UNBLANKING; proximity covered");
         }
-        else if( display_state != MCE_DISPLAY_ON ) {
+        else if( display_state_curr != MCE_DISPLAY_ON ) {
             mce_log(LL_DEBUG, "display unblank");
-            mce_datapipe_req_display_state(MCE_DISPLAY_ON);
+            mce_datapipe_request_display_state(MCE_DISPLAY_ON);
         }
     }
 
     /* Make sure "proximityblanking" state gets cleared if display
      * state is no longer controlled by this state machine. */
     if( !exdata.insync ) {
-        execute_datapipe(&proximity_blank_pipe,
-                         GINT_TO_POINTER(false),
-                         USE_INDATA, CACHE_INDATA);
+        datapipe_exec_full(&proximity_blanked_pipe,
+                           GINT_TO_POINTER(false));
     }
 
 EXIT:
-    display_prev = display_state;
+    display_prev = display_state_curr;
 
     return;
 }
 
-static void tklock_uiexcept_cancel(void)
+static void tklock_uiexception_cancel(void)
 {
     if( exdata.notif_id ) {
         g_source_remove(exdata.notif_id),
@@ -3601,11 +4029,11 @@ static void tklock_uiexcept_cancel(void)
             exdata.linger_id = 0;
     }
 
-    exdata.mask        = UIEXC_NONE;
-    exdata.last        = UIEXC_NONE;
+    exdata.mask        = UIEXCEPTION_TYPE_NONE;
+    exdata.last        = UIEXCEPTION_TYPE_NONE;
     exdata.display     = MCE_DISPLAY_UNDEF;
     exdata.tklock      = false;
-    exdata.devicelock  = DEVICE_LOCK_UNDEFINED;
+    exdata.devicelock  = DEVICELOCK_STATE_UNDEFINED;
     exdata.insync      = true;
     exdata.restore     = true;
     exdata.was_called  = false;
@@ -3615,15 +4043,15 @@ static void tklock_uiexcept_cancel(void)
     exdata.notif_id    = 0;
 }
 
-static void tklock_uiexcept_finish(void)
+static void tklock_uiexception_finish(void)
 {
     /* operate on copy of data, in case the data
      * pipe operations cause feedback */
     exception_t exx = exdata;
-    tklock_uiexcept_cancel();
+    tklock_uiexception_cancel();
 
     /* update exception data pipe first */
-    tklock_uiexcept_sync_to_datapipe();
+    tklock_uiexception_sync_to_datapipe();
 
     /* check if restoring has been blocked */
     if( !exx.restore )
@@ -3632,9 +4060,7 @@ static void tklock_uiexcept_finish(void)
     /* then flip the tklock  back on? Note that we
      * we do not unlock no matter what. */
     if( exx.tklock ) {
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_ON),
-                         USE_INDATA, CACHE_INDATA);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
     }
 
     /* and finally the display data pipe */
@@ -3642,8 +4068,7 @@ static void tklock_uiexcept_finish(void)
     default:
         /* If the display was not clearly ON when exception started,
          * turn it OFF after exceptions are over. */
-        // When the notification was handled, and screen is 'turning' off.
-        mce_datapipe_req_display_state(MCE_DISPLAY_LPM_ON);
+        mce_datapipe_request_display_state(MCE_DISPLAY_LPM_ON);
         break;
 
     case MCE_DISPLAY_ON:
@@ -3653,20 +4078,20 @@ static void tklock_uiexcept_finish(void)
          *
          * Note: Because linger times are relatively short,
          * we use raw sensor data here instead of the filtered
-         * proximity_state_effective that is normally used
+         * proximity_sensor_effective that is normally used
          * with unblanking policies. */
-        if( proximity_state_actual != COVER_OPEN ||
-            lid_cover_policy_state == COVER_CLOSED )
+        if( proximity_sensor_actual != COVER_OPEN ||
+            lid_sensor_filtered == COVER_CLOSED )
             break;
 
-        mce_datapipe_req_display_state(exx.display);
+        mce_datapipe_request_display_state(exx.display);
         break;
     }
 EXIT:
     return;
 }
 
-static gboolean tklock_uiexcept_linger_cb(gpointer aptr)
+static gboolean tklock_uiexception_linger_cb(gpointer aptr)
 {
     (void) aptr;
 
@@ -3677,7 +4102,7 @@ static gboolean tklock_uiexcept_linger_cb(gpointer aptr)
     exdata.linger_id = 0;
 
     /* Ignore unless linger bit and only linger bit is set */
-    if( exdata.mask != UIEXC_LINGER ) {
+    if( exdata.mask != UIEXCEPTION_TYPE_LINGER ) {
         mce_log(LL_WARN, "spurious linger timeout");
         goto EXIT;
     }
@@ -3687,8 +4112,8 @@ static gboolean tklock_uiexcept_linger_cb(gpointer aptr)
     /* Disable state restore if lockscreen is active and interaction
      * expected after linger. */
     if( display_state_next == MCE_DISPLAY_ON &&
-        tklock_ui_enabled && interaction_expected ) {
-        if( exdata.last == UIEXC_CALL ) {
+        tklock_ui_is_enabled() && interaction_expected ) {
+        if( exdata.last == UIEXCEPTION_TYPE_CALL ) {
             /* End of call is exception within exception because
              * the call ui can be left on top of the lockscreen and
              * there is no way to know whether that happened or not.
@@ -3700,18 +4125,18 @@ static gboolean tklock_uiexcept_linger_cb(gpointer aptr)
              */
         }
         else {
-            tklock_uiexcept_deny_state_restore(true,
-                                               "interaction during linger");
+            tklock_uiexception_deny_state_restore(true,
+                                                  "interaction during linger");
         }
     }
 
-    tklock_uiexcept_finish();
+    tklock_uiexception_finish();
 
 EXIT:
     return FALSE;
 }
 
-static void tklock_uiexcept_end(uiexctype_t type, int64_t linger)
+static void tklock_uiexception_end(uiexception_type_t type, int64_t linger)
 {
     if( !(exdata.mask & type) )
         goto EXIT;
@@ -3732,38 +4157,51 @@ static void tklock_uiexcept_end(uiexctype_t type, int64_t linger)
         int delay = (int)(exdata.linger_tick - now);
         if( delay > 0 ) {
             mce_log(LL_DEBUG, "finish after %d ms linger", delay);
-            exdata.mask |= UIEXC_LINGER;
-            exdata.linger_id = g_timeout_add(delay, tklock_uiexcept_linger_cb, 0);
+            exdata.mask |= UIEXCEPTION_TYPE_LINGER;
+            exdata.linger_id = g_timeout_add(delay, tklock_uiexception_linger_cb, 0);
         }
         else {
             mce_log(LL_DEBUG, "finish without linger");
-            tklock_uiexcept_finish();
+            tklock_uiexception_finish();
         }
     }
 
-    tklock_uiexcept_sync_to_datapipe();
+    tklock_uiexception_sync_to_datapipe();
 
 EXIT:
     return;
 }
 
-static void tklock_uiexcept_begin(uiexctype_t type, int64_t linger)
+static void tklock_uiexception_begin(uiexception_type_t type, int64_t linger)
 {
     if( !exdata.mask ) {
         /* reset existing stats */
-        tklock_uiexcept_cancel();
+        tklock_uiexception_cancel();
 
         /* save display, tklock and device lock states */
-        exdata.display    = display_state;
-        exdata.tklock     = tklock_datapipe_have_tklock_submode();
-        exdata.devicelock = device_lock_state;
+        exdata.display    = display_state_next;
+        exdata.tklock     = tklock_datapipe_in_tklock_submode();
+        exdata.devicelock = devicelock_state;
 
         /* initially insync, restore state at end */
         exdata.insync      = true;
-        exdata.restore     = (type != UIEXC_NOANIM);
+        exdata.restore     = (type != UIEXCEPTION_TYPE_NOANIM);
+
+        /* Display should be on after booting up to user mode.
+         * If something like "charger connected" notification gets
+         * triggered during bootup, we need to disable state restore
+         * in order not to cause return to some non-intentional
+         * transient state.
+         */
+        if( exdata.restore &&
+            init_done != TRISTATE_TRUE &&
+            system_state == MCE_SYSTEM_STATE_USER ) {
+            mce_log(LL_DEVEL, "suppressing display state restore");
+            exdata.restore = false;
+        }
     }
 
-    exdata.mask &= ~UIEXC_LINGER;
+    exdata.mask &= ~UIEXCEPTION_TYPE_LINGER;
     exdata.mask |= type;
 
     int64_t now = mce_lib_get_boot_tick();
@@ -3776,7 +4214,7 @@ static void tklock_uiexcept_begin(uiexctype_t type, int64_t linger)
     if( exdata.linger_id )
         g_source_remove(exdata.linger_id), exdata.linger_id = 0;
 
-    tklock_uiexcept_sync_to_datapipe();
+    tklock_uiexception_sync_to_datapipe();
 }
 
 /* ========================================================================= *
@@ -3826,9 +4264,7 @@ static void tklock_lpmui_set_state(bool enable)
          * display modes, the dbus signaling happens after some
          * delay.
          */
-        execute_datapipe(&tk_lock_pipe,
-                         GINT_TO_POINTER(LOCK_ON),
-                         USE_INDATA, CACHE_INDATA);
+        mce_datapipe_request_tklock(TKLOCK_REQUEST_ON);
     }
     else {
         /* Do delayed signaling in sync with possible tklock
@@ -3851,7 +4287,7 @@ static void tklock_lpmui_reset_history(void)
 
     for( size_t i = 0; i < numof(tklock_lpmui_hist); ++i ) {
         tklock_lpmui_hist[i].tick  = now;
-        tklock_lpmui_hist[i].state = proximity_state_actual;
+        tklock_lpmui_hist[i].state = proximity_sensor_actual;
     }
 }
 
@@ -3988,25 +4424,25 @@ static bool tklock_lpmui_probe(void)
 static void tklock_lpmui_rethink(void)
 {
     /* prerequisites: in user state, lipstick running and display off */
-    if( system_state != MCE_STATE_USER )
+    if( system_state != MCE_SYSTEM_STATE_USER )
         goto EXIT;
 
-    if( lipstick_available != SERVICE_STATE_RUNNING )
+    if( lipstick_service_state != SERVICE_STATE_RUNNING )
         goto EXIT;
 
-    if( display_state != MCE_DISPLAY_OFF )
+    if( display_state_curr != MCE_DISPLAY_OFF )
         goto EXIT;
 
     /* but not during calls, alarms, etc */
-    if( exception_state != UIEXC_NONE )
+    if( uiexception_type != UIEXCEPTION_TYPE_NONE )
         goto EXIT;
 
     /* when lid is closed */
-    if( lid_cover_policy_state == COVER_CLOSED )
+    if( lid_sensor_filtered == COVER_CLOSED )
         goto EXIT;
 
     /* or when proximity is covered */
-    if( proximity_state_effective != COVER_OPEN )
+    if( proximity_sensor_effective != COVER_OPEN )
         goto EXIT;
 
     /* Switch to lpm mode if the proximity sensor history matches activity
@@ -4017,7 +4453,7 @@ static void tklock_lpmui_rethink(void)
         /* Note: Display plugin handles MCE_DISPLAY_LPM_ON request as
          *       MCE_DISPLAY_OFF unless lpm mode is both supported
          *       and enabled. */
-        mce_datapipe_req_display_state(MCE_DISPLAY_LPM_ON);
+        mce_datapipe_request_display_state(MCE_DISPLAY_LPM_ON);
     }
 
 EXIT:
@@ -4029,7 +4465,7 @@ EXIT:
  */
 static void tklock_lpmui_pre_transition_actions(void)
 {
-    mce_log(LL_DEBUG, "prev=%d, next=%d", display_state, display_state_next);
+    mce_log(LL_DEBUG, "prev=%d, next=%d", display_state_curr, display_state_next);
 
     switch( display_state_next ) {
     case MCE_DISPLAY_LPM_ON:
@@ -4039,7 +4475,7 @@ static void tklock_lpmui_pre_transition_actions(void)
         break;
 
     case MCE_DISPLAY_OFF:
-        switch( display_state ) {
+        switch( display_state_curr ) {
         case MCE_DISPLAY_ON:
         case MCE_DISPLAY_DIM:
             /* We are about to power off from ON/DIM */
@@ -4199,8 +4635,8 @@ EXIT:
 static void tklock_evctrl_rethink(void)
 {
     /* state variable hooks:
-     *  proximity_state_effective <-- tklock_datapipe_proximity_sensor_cb()
-     *  display_state   <-- tklock_datapipe_display_state_cb()
+     *  proximity_sensor_effective <-- tklock_datapipe_proximity_sensor_actual_cb()
+     *  display_state_curr   <-- tklock_datapipe_display_state_curr_cb()
      *  submode         <-- tklock_datapipe_submode_cb()
      *  call_state      <-- tklock_datapipe_call_state_cb()
      */
@@ -4214,7 +4650,7 @@ static void tklock_evctrl_rethink(void)
      * - - - - - - - - - - - - - - - - - - - */
 
     /* display must be on/dim */
-    switch( display_state ) {
+    switch( display_state_curr ) {
     case MCE_DISPLAY_ON:
     case MCE_DISPLAY_DIM:
         break;
@@ -4238,7 +4674,7 @@ static void tklock_evctrl_rethink(void)
        *
        *       In absense of such info, better to do nothing.
        */
-    if( lid_cover_policy_state == COVER_CLOSED ) {
+    if( lid_sensor_filtered == COVER_CLOSED ) {
         enable_kp = false;
     }
 #endif
@@ -4256,7 +4692,7 @@ static void tklock_evctrl_rethink(void)
     }
 
     /* enable volume keys if music playing */
-    if( music_playback )
+    if( music_playback_ongoing )
         enable_kp = true;
 
     /* - - - - - - - - - - - - - - - - - - - *
@@ -4264,7 +4700,7 @@ static void tklock_evctrl_rethink(void)
      * - - - - - - - - - - - - - - - - - - - */
 
     /* display must be on/dim */
-    switch( display_state ) {
+    switch( display_state_curr ) {
     case MCE_DISPLAY_ON:
     case MCE_DISPLAY_DIM:
         break;
@@ -4287,7 +4723,7 @@ static void tklock_evctrl_rethink(void)
      * - - - - - - - - - - - - - - - - - - - */
 
     /* display must be off */
-    switch( display_state ) {
+    switch( display_state_curr ) {
     case MCE_DISPLAY_OFF:
     case MCE_DISPLAY_LPM_OFF:
     case MCE_DISPLAY_LPM_ON:
@@ -4312,7 +4748,7 @@ static void tklock_evctrl_rethink(void)
         break;
     default:
     case DBLTAP_ENABLE_NO_PROXIMITY:
-        if( proximity_state_effective != COVER_OPEN )
+        if( proximity_sensor_effective != COVER_OPEN )
             enable_dt = false;
         break;
     }
@@ -4328,7 +4764,7 @@ static void tklock_evctrl_rethink(void)
      * - - - - - - - - - - - - - - - - - - - */
 
 #if 0 // FIXME: malf is not really supported yet
-    if( submode & MCE_MALF_SUBMODE ) {
+    if( submode & MCE_SUBMODE_MALF ) {
         enable_kp = false;
         enable_ts = false;
         enable_dt = false;
@@ -4361,7 +4797,7 @@ static void tklock_evctrl_rethink(void)
 
     bool grab_ts = datapipe_get_gint(touch_grab_wanted_pipe);
 
-    switch( display_state ) {
+    switch( display_state_curr ) {
     default:
     case MCE_DISPLAY_OFF:
     case MCE_DISPLAY_POWER_DOWN:
@@ -4390,12 +4826,11 @@ static void tklock_evctrl_rethink(void)
      * only when proximity sensor is not covered / proximity
      * blocks input feature is disabled */
     if( grab_ts ||
-        ( (proximity_state_effective == COVER_OPEN ||
+        ( (proximity_sensor_effective == COVER_OPEN ||
            !proximity_blocks_touch) &&
-          (lid_cover_policy_state != COVER_CLOSED) ) ) {
-        execute_datapipe(&touch_grab_wanted_pipe,
-                         GINT_TO_POINTER(grab_ts),
-                         USE_INDATA, CACHE_INDATA);
+          (lid_sensor_filtered != COVER_CLOSED) ) ) {
+        datapipe_exec_full(&touch_grab_wanted_pipe,
+                           GINT_TO_POINTER(grab_ts));
     }
 
     /* - - - - - - - - - - - - - - - - - - - *
@@ -4409,7 +4844,7 @@ static void tklock_evctrl_rethink(void)
 
     switch( volkey_policy ) {
     case VOLKEY_POLICY_MEDIA_ONLY:
-        if( !music_playback )
+        if( !music_playback_ongoing )
             grab_kp = true;
         break;
 
@@ -4420,9 +4855,8 @@ static void tklock_evctrl_rethink(void)
     if( !tk_input_policy_enabled )
         grab_kp = false;
 
-    execute_datapipe(&keypad_grab_wanted_pipe,
-                     GINT_TO_POINTER(grab_kp),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&keypad_grab_wanted_pipe,
+                       GINT_TO_POINTER(grab_kp));
 
     return;
 }
@@ -4812,6 +5246,18 @@ static void tklock_setting_cb(GConfClient *const gcc, const guint id,
         mce_log(LL_NOTICE, "exception_length_activity: %d -> %d",
                 old, exception_length_activity);
     }
+    else if( id == tklock_proximity_delay_default_setting_id ) {
+        gint old = tklock_proximity_delay_default;
+        tklock_proximity_delay_default = gconf_value_get_int(gcv);
+        mce_log(LL_NOTICE, "proximity_delay_default: %d -> %d",
+                old, tklock_proximity_delay_default);
+    }
+    else if( id == tklock_proximity_delay_incall_setting_id ) {
+        gint old = tklock_proximity_delay_incall;
+        tklock_proximity_delay_incall = gconf_value_get_int(gcv);
+        mce_log(LL_NOTICE, "proximity_delay_incall: %d -> %d",
+                old, tklock_proximity_delay_incall);
+    }
     else {
         mce_log(LL_WARN, "Spurious GConf value received; confused!");
     }
@@ -5035,6 +5481,19 @@ static void tklock_setting_init(void)
                            MCE_DEFAULT_TK_LOCKSCREEN_ANIM_ENABLED,
                            tklock_setting_cb,
                            &lockscreen_anim_enabled_setting_id);
+
+    /* Delays for proximity sensor uncover handling */
+    mce_setting_track_int(MCE_SETTING_TK_PROXIMITY_DELAY_DEFAULT,
+                          &tklock_proximity_delay_default,
+                          MCE_DEFAULT_TK_PROXIMITY_DELAY_DEFAULT,
+                          tklock_setting_cb,
+                          &tklock_proximity_delay_default_setting_id);
+
+    mce_setting_track_int(MCE_SETTING_TK_PROXIMITY_DELAY_INCALL,
+                          &tklock_proximity_delay_incall,
+                          MCE_DEFAULT_TK_PROXIMITY_DELAY_INCALL,
+                          tklock_setting_cb,
+                          &tklock_proximity_delay_incall_setting_id);
 }
 
 /** Stop tracking setting changes
@@ -5272,7 +5731,7 @@ static guint tklock_ui_notify_beg_id = 0;
 
 static void tklock_ui_send_tklock_signal(void)
 {
-    bool current = tklock_datapipe_have_tklock_submode();
+    bool current = tklock_ui_is_enabled();
 
     if( tklock_ui_notified == current )
         goto EXIT;
@@ -5280,7 +5739,7 @@ static void tklock_ui_send_tklock_signal(void)
     tklock_ui_notified = current;
 
     /* do lipstick specific ipc */
-    if( lipstick_available == SERVICE_STATE_RUNNING ) {
+    if( lipstick_service_state == SERVICE_STATE_RUNNING ) {
         if( current )
             tklock_ui_open();
         else
@@ -5324,11 +5783,23 @@ static bool tklock_ui_notify_must_be_delayed(void)
      * off sequence as those might trigger lockscreen related
      * animations at UI side */
 
-    if( display_state == MCE_DISPLAY_POWER_DOWN ) {
+    if( display_state_curr == MCE_DISPLAY_POWER_DOWN ) {
         /* Powering down the display for any reason */
         delay = true;
     }
-    else if( display_state != display_state_next ) {
+    else if( display_state_curr != display_state_next ) {
+        switch( display_state_curr ) {
+        case MCE_DISPLAY_LPM_ON:
+            /* Making transition from lpm state. In order not
+             * to confuse device lock ui, finish the display
+             * state transition before acting on tklock state.
+             */
+            delay = true;
+            break;
+        default:
+            break;
+        }
+
         switch( display_state_next ) {
         case MCE_DISPLAY_OFF:
         case MCE_DISPLAY_LPM_OFF:
@@ -5379,7 +5850,7 @@ static gboolean tklock_ui_notify_beg_cb(gpointer data)
 
     /* Deal with redirection of tkunlock -> show device lock prompt */
     if( tklock_devicelock_want_to_unlock ) {
-        if( tklock_ui_enabled &&
+        if( tklock_ui_is_enabled() &&
             display_state_next == MCE_DISPLAY_ON ) {
             mce_log(LL_DEBUG, "request: show device lock query");
             tklock_ui_show_device_unlock();
@@ -5437,59 +5908,93 @@ EXIT:
     tklock_ui_notify_rethink_wakelock();
 }
 
-static void tklock_ui_set(bool enable)
+/** Timer for synchronizing tklock ui state -> submode tklock bit */
+static guint    tklock_ui_sync_id = 0;
+
+/** Callback for synchronizing tklock_ui -> submode tklock bit */
+static gboolean tklock_ui_sync_cb(gpointer aptr)
 {
+    (void)aptr;
+
+    tklock_ui_sync_id = 0;
+
+    mce_log(LL_DEBUG, "tklock sync triggered");
+
+    bool enabled = tklock_ui_is_enabled();
+
+    if( tklock_datapipe_in_tklock_submode() != enabled )
+        tklock_datapipe_set_tklock_submode(enabled);
+
+    return G_SOURCE_REMOVE;
+}
+
+static bool tklock_ui_is_enabled(void)
+{
+    return tklock_ui_enabled_pvt;
+}
+
+static void tklock_ui_set_enabled(bool enable)
+{
+    /* See also tklock_datapipe_set_tklock_submode() */
+
+    /* Note: As long as lipstick process is running, mce must
+     *       not attempt forced tklock removal as it can lead
+     *       to tklock state ringing if/when lipstick happens
+     *       to require tklock to be set. */
+
     /* Filter request based on device state */
-    if( enable ) {
-        /* Note: As long as lipstick process is running, mce must
-         *       not attempt forced tklock removal as it can lead
-         *       to tklock state ringing if/when lipstick happens
-         *       to require tklock to be set. */
 
-        if( lipstick_available != SERVICE_STATE_RUNNING ) {
-            /* When there is no UI to lock, allowing tklock to
-             * be set can only cause problems */
-            mce_log(LL_INFO, "deny tklock; lipstick not running");
-            enable = false;
-        }
-    }
-
-    /* Skip if there would be no change */
-    if( tklock_ui_enabled == enable )
+    /* When there is no UI to lock, allowing tklock to
+     * be set can only cause problems */
+    if( enable && lipstick_service_state != SERVICE_STATE_RUNNING ) {
+        mce_log(LL_INFO, "deny tklock; lipstick not running");
+        enable = false;
         goto EXIT;
+    }
 
     /* If device lock is handled in lockscreen, we must not
      * allow *removing* of tklock (=move away from lockscreen)
      * while device lock is still active. */
-    if( tklock_devicelock_in_lockscreen &&
-        device_lock_state == DEVICE_LOCK_LOCKED && !enable ) {
+    if( !enable && tklock_devicelock_in_lockscreen &&
+        devicelock_state == DEVICELOCK_STATE_LOCKED ) {
         mce_log(LL_DEVEL, "deny tkunlock; show device lock query");
         tklock_devicelock_want_to_unlock = true;
+        enable = true;
         goto EXIT;
     }
 
     /* Do not allow unlocking while lid sensor is enabled and covered */
-    if( lid_cover_policy_state == COVER_CLOSED && !enable ) {
+    if( !enable && lid_sensor_filtered == COVER_CLOSED && !enable ) {
         mce_log(LL_WARN, "deny tkunlock; lid sensor is covered");
+        enable = true;
         goto EXIT;
     }
 
-    /* Activate the new tklock state */
-    if( (tklock_ui_enabled = enable) )
-        mce_add_submode_int32(MCE_TKLOCK_SUBMODE);
-    else
-        mce_rem_submode_int32(MCE_TKLOCK_SUBMODE);
+    /* Request accepted as-is */
 
 EXIT:
+    /* Check and handle state change */
+    if( tklock_ui_enabled_pvt != enable ) {
+        tklock_ui_enabled_pvt = enable;
+        mce_log(LL_DEBUG, "tklock_ui_enabled: %s",
+                tklock_ui_enabled_pvt ? "TRUE" : "FALSE");
+    }
+
     /* Schedule notification attempt even if there is no change,
      * so that ui side is not left thinking that a tklock request
      * it made was accepted. */
     tklock_ui_notify_schdule();
+
+    /* Sync to submode in any case */
+    if( !tklock_ui_sync_id ) {
+        mce_log(LL_DEBUG, "tklock sync scheduled");
+        tklock_ui_sync_id = g_idle_add(tklock_ui_sync_cb, 0);
+    }
 }
 
 /** Handle reply to device lock state query
  */
-static void tklock_ui_get_device_lock_cb(DBusPendingCall *pc, void *aptr)
+static void tklock_ui_get_devicelock_cb(DBusPendingCall *pc, void *aptr)
 {
     (void)aptr;
 
@@ -5511,8 +6016,9 @@ static void tklock_ui_get_device_lock_cb(DBusPendingCall *pc, void *aptr)
         goto EXIT;
     }
 
-    mce_log(LL_INFO, "device lock status reply: state=%d", val);
-    tklock_datapipe_set_device_lock_state(val);
+    mce_log(LL_INFO, "device lock status reply: state=%s",
+            devicelock_state_repr(val));
+    tklock_datapipe_set_devicelock_state(val);
 
 EXIT:
     if( rsp ) dbus_message_unref(rsp);
@@ -5521,14 +6027,14 @@ EXIT:
 
 /** Initiate asynchronous device lock state query
  */
-static void tklock_ui_get_device_lock(void)
+static void tklock_ui_get_devicelock(void)
 {
     mce_log(LL_DEBUG, "query device lock status");
     dbus_send(DEVICELOCK_SERVICE,
               DEVICELOCK_REQUEST_PATH,
               DEVICELOCK_REQUEST_IF,
               "state",
-              tklock_ui_get_device_lock_cb,
+              tklock_ui_get_devicelock_cb,
               DBUS_TYPE_INVALID);
 }
 
@@ -5544,7 +6050,7 @@ static void tklock_ui_send_lpm_signal(void)
     bool enabled = (tklock_lpmui_state_wanted > 0);
 
     /* Do lipstick specific ipc 1st */
-    if( lipstick_available == SERVICE_STATE_RUNNING ) {
+    if( lipstick_service_state == SERVICE_STATE_RUNNING ) {
         if( enabled )
             tklock_ui_enable_lpm();
         else
@@ -5641,7 +6147,7 @@ tklock_dbus_send_display_blanking_policy(DBusMessage *const req)
     if( !rsp )
         goto EXIT;
 
-    const char *arg = uiexctype_to_dbus(exception_state);
+    const char *arg = uiexception_type_to_dbus(uiexception_type);
 
     mce_log(LL_DEBUG, "send display blanking policy %s: %s",
             req ? "reply" : "signal", arg);
@@ -5694,7 +6200,7 @@ tklock_dbus_send_keyboard_slide_state(DBusMessage *const req)
 
     const char *arg = MCE_SLIDING_KEYBOARD_UNDEF;
 
-    switch( kbd_slide_output_state ) {
+    switch( keyboard_slide_output_state ) {
     case COVER_OPEN:   arg = MCE_SLIDING_KEYBOARD_OPEN;   break;
     case COVER_CLOSED: arg = MCE_SLIDING_KEYBOARD_CLOSED; break;
     default: break;
@@ -5751,7 +6257,7 @@ tklock_dbus_send_keyboard_available_state(DBusMessage *const req)
 
     const char *arg = MCE_HARDWARE_KEYBOARD_UNDEF;
 
-    switch( kbd_available_state ) {
+    switch( keyboard_available_state ) {
     case COVER_OPEN:   arg = MCE_HARDWARE_KEYBOARD_AVAILABLE;     break;
     case COVER_CLOSED: arg = MCE_HARDWARE_KEYBOARD_NOT_AVAILABLE; break;
     default: break;
@@ -5799,7 +6305,10 @@ static gboolean tklock_dbus_send_tklock_mode(DBusMessage *const method_call)
 {
     gboolean    status = FALSE;
     DBusMessage *msg   = NULL;
-    const char  *mode  = (tklock_datapipe_have_tklock_submode() ?
+
+    /* Note: Events on D-Bus must be based on tklock ui state,
+     *       not submode tklock bit. */
+    const char  *mode  = (tklock_ui_is_enabled() ?
                           MCE_TK_LOCKED : MCE_TK_UNLOCKED);
 
     /* If method_call is set, send a reply. Otherwise, send a signal. */
@@ -5865,42 +6374,42 @@ EXIT:
  *
  * @returns allowed state
  */
-static lock_state_t
-tklock_dbus_sanitize_requested_mode(lock_state_t state)
+static tklock_request_t
+tklock_dbus_sanitize_requested_mode(tklock_request_t state)
 {
     /* Translate toggle requests to something we can evaluate */
-    if( state == LOCK_TOGGLE )
-        state = tklock_ui_enabled ? LOCK_OFF : LOCK_ON;
+    if( state == TKLOCK_REQUEST_TOGGLE )
+        state = tklock_ui_is_enabled() ? TKLOCK_REQUEST_OFF : TKLOCK_REQUEST_ON;
 
     switch( state ) {
     default:
-    case LOCK_UNDEF:
-    case LOCK_TOGGLE:
+    case TKLOCK_REQUEST_UNDEF:
+    case TKLOCK_REQUEST_TOGGLE:
         break;
 
-    case LOCK_OFF:
-    case LOCK_OFF_DELAYED:
-    case LOCK_OFF_PROXIMITY:
-        state = LOCK_OFF;
+    case TKLOCK_REQUEST_OFF:
+    case TKLOCK_REQUEST_OFF_DELAYED:
+    case TKLOCK_REQUEST_OFF_PROXIMITY:
+        state = TKLOCK_REQUEST_OFF;
         switch( display_state_next ) {
         case MCE_DISPLAY_ON:
         case MCE_DISPLAY_DIM:
             break;
         default:
-            if( tklock_ui_enabled ) {
+            if( tklock_ui_is_enabled() ) {
                 mce_log(LL_WARN, "tkunlock denied due to display=%s",
                         display_state_repr(display_state_next));
-                state = LOCK_ON;
+                state = TKLOCK_REQUEST_ON;
             }
             break;
         }
         goto EXIT;
 
-    case LOCK_ON:
-    case LOCK_ON_DIMMED:
-    case LOCK_ON_PROXIMITY:
-    case LOCK_ON_DELAYED:
-        state = LOCK_ON;
+    case TKLOCK_REQUEST_ON:
+    case TKLOCK_REQUEST_ON_DIMMED:
+    case TKLOCK_REQUEST_ON_PROXIMITY:
+    case TKLOCK_REQUEST_ON_DELAYED:
+        state = TKLOCK_REQUEST_ON;
         break;
     }
 EXIT:
@@ -5932,25 +6441,25 @@ static gboolean tklock_dbus_mode_change_req_cb(DBusMessage *const msg)
     mce_log(LL_DEVEL, "Received tklock mode change request '%s' from %s",
             mode, mce_dbus_get_message_sender_ident(msg));
 
-    int state = LOCK_UNDEF;
+    int state = TKLOCK_REQUEST_UNDEF;
 
     if (!strcmp(MCE_TK_LOCKED, mode))
-        state = LOCK_ON;
+        state = TKLOCK_REQUEST_ON;
     else if (!strcmp(MCE_TK_LOCKED_DIM, mode))
-        state = LOCK_ON_DIMMED;
+        state = TKLOCK_REQUEST_ON_DIMMED;
     else if (!strcmp(MCE_TK_LOCKED_DELAY, mode))
-        state = LOCK_ON_DELAYED;
+        state = TKLOCK_REQUEST_ON_DELAYED;
     else if (!strcmp(MCE_TK_UNLOCKED, mode))
-        state = LOCK_OFF;
+        state = TKLOCK_REQUEST_OFF;
     else
         mce_log(LL_WARN, "Received an invalid tklock mode; ignoring");
 
     mce_log(LL_DEBUG, "mode: %s/%d", mode, state);
 
-    if( state != LOCK_UNDEF ) {
+    if( state != TKLOCK_REQUEST_UNDEF ) {
         tklock_ui_notified = -1;
         state = tklock_dbus_sanitize_requested_mode(state);
-        tklock_datapipe_tk_lock_cb(GINT_TO_POINTER(state));
+        tklock_datapipe_tklock_request_cb(GINT_TO_POINTER(state));
     }
 
     if( no_reply )
@@ -5988,9 +6497,7 @@ static gboolean tklock_dbus_interaction_expected_cb(DBusMessage *const msg)
     }
 
     mce_log(LL_DEBUG, "received interaction expected signal: state=%d", arg);
-    execute_datapipe(&interaction_expected_pipe,
-                     GINT_TO_POINTER(arg),
-                     USE_INDATA, CACHE_INDATA);
+    tklock_datapipe_update_interaction_expected(arg);
 
 EXIT:
     dbus_error_free(&err);
@@ -6020,15 +6527,16 @@ static gboolean tklock_dbus_systemui_callback_cb(DBusMessage *const msg)
         goto EXIT;
     }
 
-    mce_log(LL_DEVEL, "tklock callback value: %d, from %s", result,
+    mce_log(LL_DEVEL, "tklock callback value: %s, from %s",
+            tklock_status_repr(result),
             mce_dbus_get_message_sender_ident(msg));
 
-    lock_state_t state = LOCK_OFF;
+    tklock_request_t state = TKLOCK_REQUEST_OFF;
     switch( result ) {
     case TKLOCK_UNLOCK:
         tklock_ui_notified = -1;
         state = tklock_dbus_sanitize_requested_mode(state);
-        tklock_datapipe_tk_lock_cb(GINT_TO_POINTER(state));
+        tklock_datapipe_tklock_request_cb(GINT_TO_POINTER(state));
         break;
 
     default:
@@ -6129,7 +6637,7 @@ EXIT:
  *
  * @return TRUE
  */
-static gboolean tklock_dbus_device_lock_changed_cb(DBusMessage *const msg)
+static gboolean tklock_dbus_devicelock_changed_cb(DBusMessage *const msg)
 {
     DBusError    err = DBUS_ERROR_INIT;
     dbus_int32_t val = 0;
@@ -6145,8 +6653,9 @@ static gboolean tklock_dbus_device_lock_changed_cb(DBusMessage *const msg)
         goto EXIT;
     }
 
-    mce_log(LL_DEBUG, "received device lock signal: state=%d", val);
-    tklock_datapipe_set_device_lock_state(val);
+    mce_log(LL_DEBUG, "received device lock signal: state=%s",
+            devicelock_state_repr(val));
+    tklock_datapipe_set_devicelock_state(val);
 
 EXIT:
     dbus_error_free(&err);
@@ -6163,7 +6672,7 @@ static mce_dbus_handler_t tklock_dbus_handlers[] =
         .name      = "stateChanged",
         .rules     = "path='/devicelock'",
         .type      = DBUS_MESSAGE_TYPE_SIGNAL,
-        .callback  = tklock_dbus_device_lock_changed_cb,
+        .callback  = tklock_dbus_devicelock_changed_cb,
     },
     {
         .interface = "org.nemomobile.lipstick.screenlock",
@@ -6491,14 +7000,14 @@ tklock_notif_update_state(void)
     if( tmo < MAX_TICK ) {
         tklock_notif_schedule_autostop((gint)(tmo - now));
 
-        tklock_uiexcept_begin(UIEXC_NOTIF, 0);
-        tklock_uiexcept_rethink();
+        tklock_uiexception_begin(UIEXCEPTION_TYPE_NOTIF, 0);
+        tklock_uiexception_rethink();
     }
     else {
         if( (tmo = tklock_notif_state.tn_linger - now) < 0 )
             tmo = 0;
-        tklock_uiexcept_end(UIEXC_NOTIF, tmo);
-        tklock_uiexcept_rethink();
+        tklock_uiexception_end(UIEXCEPTION_TYPE_NOTIF, tmo);
+        tklock_uiexception_rethink();
     }
 }
 
@@ -6800,13 +7309,20 @@ void mce_tklock_exit(void)
     /* cancel all timers */
     tklock_autolock_disable();
     tklock_proxlock_disable();
-    tklock_uiexcept_cancel();
+    tklock_uiexception_cancel();
     tklock_dtcalib_stop();
     tklock_datapipe_proximity_uncover_cancel();
     tklock_notif_quit();
     tklock_ui_notify_cancel();
 
     tklock_autolock_quit();
+
+    if( tklock_ui_sync_id ) {
+        g_source_remove(tklock_ui_sync_id),
+            tklock_ui_sync_id = 0;
+    }
+
+    common_on_proximity_cancel(MODULE_NAME, 0, 0);
 
     // FIXME: check that final state is sane
 
@@ -6826,10 +7342,10 @@ void mce_tklock_unblank(display_state_t to_state)
         /* Disable lockscreen animations by invoking a faked
          * abnormal display blanking policy for the duration
          * of the display power up. */
-        tklock_uiexcept_begin(UIEXC_NOANIM, 0);
+        tklock_uiexception_begin(UIEXCEPTION_TYPE_NOANIM, 0);
     }
 
-    mce_datapipe_req_display_state(to_state);
+    mce_datapipe_request_display_state(to_state);
 
 EXIT:
     return;

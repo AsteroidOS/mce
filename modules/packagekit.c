@@ -1,8 +1,23 @@
-/* ------------------------------------------------------------------------- *
- * Copyright (C) 2014 Jolla Ltd.
- * Contact: Simo Piiroinen <simo.piiroinen@jollamobile.com>
- * License: LGPLv2.1
- * ------------------------------------------------------------------------- */
+/**
+ * @file packagekit.c
+ * Mode Control Entity - tracking package upgrade status
+ * <p>
+ * Copyright (C) 2014-2019 Jolla Ltd.
+ * <p>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ *
+ * mce is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU Lesser General Public License
+ * version 2.1 as published by the Free Software Foundation.
+ *
+ * mce is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ * Lesser General Public License for more details.
+ *
+ * You should have received a copy of the GNU Lesser General Public
+ * License along with mce.  If not, see <http://www.gnu.org/licenses/>.
+ */
 
 #include "../mce.h"
 #include "../mce-log.h"
@@ -82,7 +97,7 @@ static void     xpkgkit_logging_cancel_start    (void);
 
 // DATAPIPE_HANDLERS
 
-static void     xpkgkit_datapipe_update_mode_cb(gconstpointer data);
+static void     xpkgkit_datapipe_osupdate_running_cb(gconstpointer data);
 static void     xpkgkit_datapipe_init          (void);
 static void     xpkgkit_datapipe_quit          (void);
 
@@ -112,9 +127,8 @@ xpkgkit_set_locked_state(bool locked)
     xpkgkit_is_locked = locked;
     mce_log(LL_DEBUG, "packagekit is %slocked", locked ? "" : "not ");
 
-    execute_datapipe(&packagekit_locked_pipe,
-                     GINT_TO_POINTER(xpkgkit_is_locked),
-                     USE_INDATA, CACHE_INDATA);
+    datapipe_exec_full(&packagekit_locked_pipe,
+                       GINT_TO_POINTER(xpkgkit_is_locked));
 
 EXIT:
     return;
@@ -485,21 +499,21 @@ EXIT:
  * ========================================================================= */
 
 /** Update mode is active; assume false */
-static bool update_mode = false;
+static bool osupdate_running = false;
 
-/** Change notifications for update_mode
+/** Change notifications for osupdate_running
  */
-static void xpkgkit_datapipe_update_mode_cb(gconstpointer data)
+static void xpkgkit_datapipe_osupdate_running_cb(gconstpointer data)
 {
-    bool prev = update_mode;
-    update_mode = GPOINTER_TO_INT(data);
+    bool prev = osupdate_running;
+    osupdate_running = GPOINTER_TO_INT(data);
 
-    if( update_mode == prev )
+    if( osupdate_running == prev )
         goto EXIT;
 
-    mce_log(LL_DEBUG, "update_mode = %d -> %d", prev, update_mode);
+    mce_log(LL_DEBUG, "osupdate_running = %d -> %d", prev, osupdate_running);
 
-    if( update_mode ) {
+    if( osupdate_running ) {
         /* When update mode gets activated, we start a systemd
          * service that will store journal to a persistent file
          * until the next reboot. */
@@ -515,8 +529,8 @@ static datapipe_handler_t xpkgkit_datapipe_handlers[] =
 {
     // output triggers
     {
-        .datapipe  = &update_mode_pipe,
-        .output_cb = xpkgkit_datapipe_update_mode_cb,
+        .datapipe  = &osupdate_running_pipe,
+        .output_cb = xpkgkit_datapipe_osupdate_running_cb,
     },
 
     // sentinel
@@ -535,14 +549,14 @@ static datapipe_bindings_t xpkgkit_datapipe_bindings =
  */
 static void xpkgkit_datapipe_init(void)
 {
-    datapipe_bindings_init(&xpkgkit_datapipe_bindings);
+    mce_datapipe_init_bindings(&xpkgkit_datapipe_bindings);
 }
 
 /** Remove triggers/filters from datapipes
  */
 static void xpkgkit_datapipe_quit(void)
 {
-    datapipe_bindings_quit(&xpkgkit_datapipe_bindings);
+    mce_datapipe_quit_bindings(&xpkgkit_datapipe_bindings);
 }
 
 /* ========================================================================= *

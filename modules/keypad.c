@@ -3,8 +3,12 @@
  * Keypad module -- this handles the keypress logic for MCE
  * <p>
  * Copyright © 2004-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2012-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
+ * @author Matti Lehtimäki <matti.lehtimaki@gmail.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -420,35 +424,35 @@ static void set_lysti_backlight_brightness(guint fadetime, guint brightness)
 	old_brightness = brightness;
 
 	/* Disable engine 3 */
-	(void)mce_write_string_to_file(engine3_mode_path,
-				       MCE_LED_DISABLED_MODE);
+	mce_write_string_to_file(engine3_mode_path,
+				 MCE_LED_DISABLED_MODE);
 
 	/* Turn off all keyboard backlight LEDs */
-	(void)mce_write_number_string_to_file(&led_brightness_kb0_output, 0);
-	(void)mce_write_number_string_to_file(&led_brightness_kb1_output, 0);
-	(void)mce_write_number_string_to_file(&led_brightness_kb2_output, 0);
-	(void)mce_write_number_string_to_file(&led_brightness_kb3_output, 0);
-	(void)mce_write_number_string_to_file(&led_brightness_kb4_output, 0);
-	(void)mce_write_number_string_to_file(&led_brightness_kb5_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb0_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb1_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb2_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb3_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb4_output, 0);
+	mce_write_number_string_to_file(&led_brightness_kb5_output, 0);
 
 	/* Set backlight LED current */
-	(void)mce_write_number_string_to_file(&led_current_kb0_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
-	(void)mce_write_number_string_to_file(&led_current_kb1_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
-	(void)mce_write_number_string_to_file(&led_current_kb2_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
-	(void)mce_write_number_string_to_file(&led_current_kb3_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
-	(void)mce_write_number_string_to_file(&led_current_kb4_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
-	(void)mce_write_number_string_to_file(&led_current_kb5_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb0_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb1_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb2_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb3_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb4_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
+	mce_write_number_string_to_file(&led_current_kb5_output, MAXIMUM_LYSTI_BACKLIGHT_LED_CURRENT);
 
 	/* Engine 3 */
-	(void)mce_write_string_to_file(engine3_mode_path,
-				       MCE_LED_LOAD_MODE);
+	mce_write_string_to_file(engine3_mode_path,
+				 MCE_LED_LOAD_MODE);
 
-	(void)mce_write_string_to_file(engine3_leds_path,
-				       bin_to_string(key_backlight_mask));
-	(void)mce_write_string_to_file(engine3_load_path,
-				       pattern);
-	(void)mce_write_string_to_file(engine3_mode_path,
-				       MCE_LED_RUN_MODE);
+	mce_write_string_to_file(engine3_leds_path,
+				 bin_to_string(key_backlight_mask));
+	mce_write_string_to_file(engine3_load_path,
+				 pattern);
+	mce_write_string_to_file(engine3_mode_path,
+				 MCE_LED_RUN_MODE);
 
 EXIT:
 	return;
@@ -464,15 +468,15 @@ static void set_n810_backlight_brightness(guint fadetime, guint brightness)
 {
 	/* Set fade time */
 	if (brightness == 0) {
-		(void)mce_write_number_string_to_file(&n810_keypad_fadetime_output, fadetime);
-		(void)mce_write_number_string_to_file(&n810_keyboard_fadetime_output, fadetime);
+		mce_write_number_string_to_file(&n810_keypad_fadetime_output, fadetime);
+		mce_write_number_string_to_file(&n810_keyboard_fadetime_output, fadetime);
 	} else {
-		(void)mce_write_number_string_to_file(&n810_keypad_fadetime_output, 0);
-		(void)mce_write_number_string_to_file(&n810_keyboard_fadetime_output, 0);
+		mce_write_number_string_to_file(&n810_keypad_fadetime_output, 0);
+		mce_write_number_string_to_file(&n810_keyboard_fadetime_output, 0);
 	}
 
-	(void)mce_write_number_string_to_file(&led_brightness_kb0_output, brightness);
-	(void)mce_write_number_string_to_file(&led_brightness_kb1_output, brightness);
+	mce_write_number_string_to_file(&led_brightness_kb0_output, brightness);
+	mce_write_number_string_to_file(&led_brightness_kb1_output, brightness);
 }
 
 /**
@@ -482,7 +486,7 @@ static void set_n810_backlight_brightness(guint fadetime, guint brightness)
  */
 static void set_simple_backlight_brightness(guint brightness)
 {
-	(void)mce_write_number_string_to_file(&backlight_brightness_level_output, brightness);
+	mce_write_number_string_to_file(&backlight_brightness_level_output, brightness);
 }
 
 /**
@@ -490,7 +494,7 @@ static void set_simple_backlight_brightness(guint brightness)
  *
  * @param data Backlight brightness passed as a gconstpointer
  */
-static void set_backlight_brightness(gconstpointer data)
+static void set_key_backlight_brightness(gconstpointer data)
 {
 	static gint cached_brightness = -1;
 	gint new_brightness = GPOINTER_TO_INT(data);
@@ -541,8 +545,7 @@ static void disable_key_backlight(void)
 {
 	cancel_key_backlight_timeout();
 
-	execute_datapipe(&key_backlight_pipe, GINT_TO_POINTER(0),
-			 USE_INDATA, CACHE_INDATA);
+	datapipe_exec_full(&key_backlight_brightness_pipe, GINT_TO_POINTER(0));
 }
 
 /**
@@ -594,16 +597,15 @@ static void enable_key_backlight(void)
 	cancel_key_backlight_timeout();
 
 	/* Only enable the key backlight if the slide is open */
-	if (datapipe_get_gint(keyboard_slide_pipe) != COVER_OPEN)
+	if (datapipe_get_gint(keyboard_slide_state_pipe) != COVER_OPEN)
 		goto EXIT;
 
 	setup_key_backlight_timeout();
 
 	/* If the backlight is off, turn it on */
-	if (datapipe_get_guint(key_backlight_pipe) == 0) {
-		execute_datapipe(&key_backlight_pipe,
-				 GINT_TO_POINTER(backlight_brightness_level_maximum),
-				 USE_INDATA, CACHE_INDATA);
+	if (datapipe_get_guint(key_backlight_brightness_pipe) == 0) {
+		datapipe_exec_full(&key_backlight_brightness_pipe,
+				   GINT_TO_POINTER(backlight_brightness_level_maximum));
 	}
 
 EXIT:
@@ -615,7 +617,7 @@ EXIT:
  */
 static void enable_key_backlight_policy(void)
 {
-	cover_state_t kbd_slide_state = datapipe_get_gint(keyboard_slide_pipe);
+	cover_state_t kbd_slide_state = datapipe_get_gint(keyboard_slide_state_pipe);
 	system_state_t system_state = datapipe_get_gint(system_state_pipe);
 	alarm_ui_state_t alarm_ui_state =
 		datapipe_get_gint(alarm_ui_state_pipe);
@@ -633,7 +635,7 @@ static void enable_key_backlight_policy(void)
 	/* Only enable the key backlight in USER state
 	 * and when the alarm dialog is visible
 	 */
-	if ((system_state == MCE_STATE_USER) ||
+	if ((system_state == MCE_SYSTEM_STATE_USER) ||
 	    ((alarm_ui_state == MCE_ALARM_UI_VISIBLE_INT32) ||
 	     (alarm_ui_state == MCE_ALARM_UI_RINGING_INT32))) {
 		/* If there's a key backlight timeout active, restart it,
@@ -731,10 +733,10 @@ static void device_inactive_trigger(gconstpointer const data)
  *             COVER_OPEN if the keyboard is open,
  *             COVER_CLOSED if the keyboard is closed
  */
-static void keyboard_slide_trigger(gconstpointer const data)
+static void keyboard_slide_state_trigger(gconstpointer const data)
 {
 	if ((GPOINTER_TO_INT(data) == COVER_OPEN) &&
-	    ((mce_get_submode_int32() & MCE_TKLOCK_SUBMODE) == 0)) {
+	    ((mce_get_submode_int32() & MCE_SUBMODE_TKLOCK) == 0)) {
 		enable_key_backlight_policy();
 	} else {
 		disable_key_backlight();
@@ -746,16 +748,16 @@ static void keyboard_slide_trigger(gconstpointer const data)
  *
  * @param data The display stated stored in a pointer
  */
-static void display_state_trigger(gconstpointer data)
+static void display_state_curr_trigger(gconstpointer data)
 {
 	static display_state_t old_display_state = MCE_DISPLAY_UNDEF;
-	display_state_t display_state = GPOINTER_TO_INT(data);
+	display_state_t display_state_curr = GPOINTER_TO_INT(data);
 
-	if (old_display_state == display_state)
+	if (old_display_state == display_state_curr)
 		goto EXIT;
 
 	/* Disable the key backlight if the display dims */
-	switch (display_state) {
+	switch (display_state_curr) {
 	case MCE_DISPLAY_OFF:
 	case MCE_DISPLAY_LPM_OFF:
 	case MCE_DISPLAY_LPM_ON:
@@ -776,7 +778,7 @@ static void display_state_trigger(gconstpointer data)
 		break;
 	}
 
-	old_display_state = display_state;
+	old_display_state = display_state_curr;
 
 EXIT:
 	return;
@@ -794,7 +796,7 @@ static void system_state_trigger(gconstpointer data)
 	/* If we're changing to another state than USER,
 	 * disable the key backlight
 	 */
-	if (system_state != MCE_STATE_USER)
+	if (system_state != MCE_SYSTEM_STATE_USER)
 		disable_key_backlight();
 }
 
@@ -830,6 +832,56 @@ static void mce_keypad_quit_dbus(void)
 	mce_dbus_handler_unregister_array(keypad_dbus_handlers);
 }
 
+/** Array of datapipe handlers */
+static datapipe_handler_t mce_keypad_datapipe_handlers[] =
+{
+	// output triggers
+	{
+		.datapipe  = &system_state_pipe,
+		.output_cb = system_state_trigger,
+	},
+	{
+		.datapipe  = &key_backlight_brightness_pipe,
+		.output_cb = set_key_backlight_brightness,
+	},
+	{
+		.datapipe  = &device_inactive_pipe,
+		.output_cb = device_inactive_trigger,
+	},
+	{
+		.datapipe  = &keyboard_slide_state_pipe,
+		.output_cb = keyboard_slide_state_trigger,
+	},
+	{
+		.datapipe  = &display_state_curr_pipe,
+		.output_cb = display_state_curr_trigger,
+	},
+	// sentinel
+	{
+		.datapipe = 0,
+	}
+};
+
+static datapipe_bindings_t mce_keypad_datapipe_bindings =
+{
+	.module   = "mce_keypad",
+	.handlers = mce_keypad_datapipe_handlers,
+};
+
+/** Append triggers/filters to datapipes
+ */
+static void mce_keypad_datapipe_init(void)
+{
+	mce_datapipe_init_bindings(&mce_keypad_datapipe_bindings);
+}
+
+/** Remove triggers/filters from datapipes
+ */
+static void mce_keypad_datapipe_quit(void)
+{
+	mce_datapipe_quit_bindings(&mce_keypad_datapipe_bindings);
+}
+
 /**
  * Init function for the keypad module
  *
@@ -846,16 +898,7 @@ const gchar *g_module_check_init(GModule *module)
 	(void)module;
 
 	/* Append triggers/filters to datapipes */
-	append_output_trigger_to_datapipe(&system_state_pipe,
-					  system_state_trigger);
-	append_output_trigger_to_datapipe(&key_backlight_pipe,
-					  set_backlight_brightness);
-	append_output_trigger_to_datapipe(&device_inactive_state_pipe,
-					  device_inactive_trigger);
-	append_output_trigger_to_datapipe(&keyboard_slide_pipe,
-					  keyboard_slide_trigger);
-	append_output_trigger_to_datapipe(&display_state_pipe,
-					  display_state_trigger);
+	mce_keypad_datapipe_init();
 
 	/* Get configuration options */
 	key_backlight_timeout =
@@ -945,16 +988,7 @@ void g_module_unload(GModule *module)
 	g_free(engine3_leds_path);
 
 	/* Remove triggers/filters from datapipes */
-	remove_output_trigger_from_datapipe(&display_state_pipe,
-					    display_state_trigger);
-	remove_output_trigger_from_datapipe(&keyboard_slide_pipe,
-					    keyboard_slide_trigger);
-	remove_output_trigger_from_datapipe(&device_inactive_state_pipe,
-					    device_inactive_trigger);
-	remove_output_trigger_from_datapipe(&key_backlight_pipe,
-					    set_backlight_brightness);
-	remove_output_trigger_from_datapipe(&system_state_pipe,
-					    system_state_trigger);
+	mce_keypad_datapipe_quit();
 
 	/* Remove all timer sources */
 	cancel_key_backlight_timeout();

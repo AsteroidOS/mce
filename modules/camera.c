@@ -3,8 +3,11 @@
  * Camera module -- this handles the camera LED-indicator for MCE
  * <p>
  * Copyright © 2007-2011 Nokia Corporation and/or its subsidiary(-ies).
+ * Copyright (C) 2013-2019 Jolla Ltd.
  * <p>
  * @author David Weinehall <david.weinehall@nokia.com>
+ * @author Santtu Lakkala <ext-santtu.1.lakkala@nokia.com>
+ * @author Simo Piiroinen <simo.piiroinen@jollamobile.com>
  *
  * mce is free software; you can redistribute it and/or modify
  * it under the terms of the GNU Lesser General Public License
@@ -21,7 +24,7 @@
 
 #include "camera.h"
 
-#include "../mce.h"
+#include "../mce-log.h"
 #include "../mce-io.h"
 #include "../mce-conf.h"
 #include "../tklock.h"
@@ -98,13 +101,11 @@ static gboolean camera_active_state_iomon_input_cb(mce_io_mon_t *iomon, gpointer
 	(void)bytes_read;
 
 	if (!strncmp(data, MCE_CAMERA_ACTIVE, strlen(MCE_CAMERA_ACTIVE))) {
-		execute_datapipe_output_triggers(&led_pattern_activate_pipe,
-						 MCE_LED_PATTERN_CAMERA,
-						 USE_INDATA);
+		datapipe_exec_full(&led_pattern_activate_pipe,
+				   MCE_LED_PATTERN_CAMERA);
 	} else {
-		execute_datapipe_output_triggers(&led_pattern_deactivate_pipe,
-						 MCE_LED_PATTERN_CAMERA,
-						 USE_INDATA);
+		datapipe_exec_full(&led_pattern_deactivate_pipe,
+				   MCE_LED_PATTERN_CAMERA);
 	}
 
 	return FALSE;
@@ -123,8 +124,7 @@ static gboolean camera_popout_state_iomon_input_cb(mce_io_mon_t *iomon, gpointer
 	(void)bytes_read;
 
 	/* Generate activity */
-	execute_datapipe(&device_inactive_event_pipe, GINT_TO_POINTER(FALSE),
-			 USE_INDATA, CACHE_OUTDATA);
+	mce_datapipe_generate_activity();
 
 	if (popout_unlock == FALSE)
 		goto EXIT;
@@ -133,9 +133,7 @@ static gboolean camera_popout_state_iomon_input_cb(mce_io_mon_t *iomon, gpointer
 	if (!strncmp(data, MCE_CAMERA_POPPED_OUT,
 		     strlen(MCE_CAMERA_POPPED_OUT))) {
 		/* Request delayed unlock of touchscreen/keypad lock */
-		(void)execute_datapipe(&tk_lock_pipe,
-				       GINT_TO_POINTER(LOCK_OFF_DELAYED),
-				       USE_INDATA, CACHE_INDATA);
+		mce_datapipe_request_tklock(TKLOCK_REQUEST_OFF_DELAYED);
 	}
 
 EXIT:
